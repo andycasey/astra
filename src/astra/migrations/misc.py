@@ -20,7 +20,7 @@ from astra import __version__
 
 von = lambda v: v or np.nan
 
-def update_n_associated_and_version_id(limit: Optional[int] = None):
+def update_sdss_id_related_fields():
 
     from astra.models.source import Source
     from astra.migrations.sdss5db.catalogdb import CatalogdbModel
@@ -29,30 +29,57 @@ def update_n_associated_and_version_id(limit: Optional[int] = None):
         class Meta:
             table_name = "sdss_id_flat"
 
+    class SDSS_ID_Stacked(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_stacked"
+
     # Subquery to get the sources we want to update
     subq = (
         Source
         .select(Source.sdss_id)
         .where(
-            Source.version_id.is_null() | (Source.n_associated == -1)
+            Source.sdss_id.is_null(False)
+        &   (
+                Source.version_id.is_null()
+            |   Source.catalogid21.is_null()
+            |   Source.catalogid25.is_null()
+            |   Source.catalogid31.is_null()
+            |   (Source.n_associated == -1)
+            )
         )
-        .limit(limit)
     )
 
     n_updated = (
         Source
         .update(
             version_id=SDSS_ID_Flat.version_id,
-            n_associated=SDSS_ID_Flat.n_associated
+            n_associated=SDSS_ID_Flat.n_associated,
+            catalogid21=SDSS_ID_Stacked.catalogid21,
+            catalogid25=SDSS_ID_Stacked.catalogid25,
+            catalogid31=SDSS_ID_Stacked.catalogid31,
         )
-        .from_(SDSS_ID_Flat)
+        .from_(SDSS_ID_Flat, SDSS_ID_Stacked)
         .where(
             (Source.sdss_id == SDSS_ID_Flat.sdss_id)
+            & (Source.sdss_id == SDSS_ID_Stacked.sdss_id)
             & (Source.sdss_id.in_(subq))
         )
         .execute()
     )
-    return n_updated
+
+    # Update things that have no catalogid to use most recent thing.
+    n_update_catalogids = (
+        Source
+        .update(catalogid=Source.catalogid31)
+        .where(
+            Source.catalogid.is_null()
+        &   Source.sdss_id.is_null(False)
+        &   Source.catalogid31.is_null(False)
+        )
+        .execute()
+    )
+
+    return max(n_updated, n_update_catalogids)
 
 
 def compute_w1mag_and_w2mag(

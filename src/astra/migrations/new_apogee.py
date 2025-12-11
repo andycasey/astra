@@ -474,6 +474,8 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             SDSS_ID_Stacked.catalogid21,
             SDSS_ID_Stacked.catalogid25,
             SDSS_ID_Stacked.catalogid31,
+            SDSS_ID_Flat.n_associated,
+            SDSS_ID_Flat.version_id,
         )
         .distinct(Star.obj, Star.telescope)
         .join(
@@ -486,6 +488,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
         )
         .switch(Star)
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(Star.sdss_id == SDSS_ID_Stacked.sdss_id))
+        .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .where(
             (Star.apred_vers == apred)
         &   (Star.pk > max_star_pk)
@@ -501,6 +504,8 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
         "catalogid31",
         "sdss_id",
         "gaia_sourceid",
+        "n_associated",
+        "version_id",
         "gaia_release",
         "sdss5_target_catalogids",
         "ra",
@@ -727,6 +732,8 @@ def migrate_apogee_visits(apred: str, max_mjd: Optional[int] = None, queue=None,
             SDSS_ID_Stacked.catalogid21,
             SDSS_ID_Stacked.catalogid25,
             SDSS_ID_Stacked.catalogid31,
+            SDSS_ID_Flat.version_id,
+            SDSS_ID_Flat.n_associated,
 
             Visit.jmag.alias("j_mag"),
             Visit.jerr.alias("e_j_mag"),
@@ -739,10 +746,12 @@ def migrate_apogee_visits(apred: str, max_mjd: Optional[int] = None, queue=None,
         .join(sq, JOIN.LEFT_OUTER, on=(Visit.pk == sq.c.visit_pk))
         .switch(Visit)
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(Visit.sdss_id == SDSS_ID_Stacked.sdss_id))
+        .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .where(
             (Visit.apred == apred)
         &   (Visit.pk > max_visit_pk)
         &   (Visit.mjd <= max_mjd)
+        &   (SDSS_ID_Flat.rank == 1)
         )
         .limit(limit)
         .dicts()
@@ -754,6 +763,8 @@ def migrate_apogee_visits(apred: str, max_mjd: Optional[int] = None, queue=None,
         "catalogid21",
         "catalogid25",
         "catalogid31",
+        "version_id",
+        "n_associated",
         "sdss_id",
         "gaia_sourceid",
         "gaia_release",
@@ -1004,7 +1015,6 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR2.catalog == Catalog.catalogid))
         .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR3.catalog == CatalogToGaia_DR2.catalogid))
-        .where(Star.apogee_id == "2M09083082+2141394")
         .limit(limit)
         .dicts()
     )
@@ -1013,7 +1023,6 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
     queue.put(dict(total=total, completed=0, description="Querying APOGEE dr17 sources"))
     source_data = {}
     for row in q.iterator():
-        print(row)
         source_key = row["sdss4_apogee_id"]
         if source_key in source_data:
             # Take the minimum sdss_id

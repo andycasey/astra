@@ -32,10 +32,10 @@ class DataStats:
 @dataclass(frozen=True)
 class StellarParameters:
     """
-    The StellarParameters class is a dataclass that represents the statistical properties of 
-    three stellar parameters: effective temperature (LOGTEFF), surface gravity (LOGG), and 
-    metallicity (FEH). The class contains three attributes, each of which is an instance of 
-    the DataStats class, representing the mean, standard deviation, post-normalization minimum, 
+    The StellarParameters class is a dataclass that represents the statistical properties of
+    three stellar parameters: effective temperature (LOGTEFF), surface gravity (LOGG), and
+    metallicity (FEH). The class contains three attributes, each of which is an instance of
+    the DataStats class, representing the mean, standard deviation, post-normalization minimum,
     and post-normalization maximum values of each parameter.
 
     Attributes:
@@ -102,18 +102,18 @@ def unnormalize(X: torch.Tensor, mean: float, std: float) -> torch.Tensor:
 
 def unnormalize_predictions(predictions: torch.Tensor) -> torch.Tensor:
     """
-    The unnormalize_predictions function takes a tensor X of shape (batch_size, 3) and unnormalizes 
-    each of its three columns using the mean and standard deviation of the corresponding DataStats 
+    The unnormalize_predictions function takes a tensor X of shape (batch_size, 3) and unnormalizes
+    each of its three columns using the mean and standard deviation of the corresponding DataStats
     objects. Specifically, the first column corresponds to LOGG, the second to LOGTEFF, the third to FEH,
     and the fourth to RV.
 
     Args:
     - predictions: torch.Tensor, Input tensor of shape (batch_size, 4).
-    - stellar_parameter_stats: StellarParameters, an object containing the mean and standard deviation of 
+    - stellar_parameter_stats: StellarParameters, an object containing the mean and standard deviation of
       the three columns of X.
 
     Returns:
-    - torch.Tensor: Output tensor of shape (batch_size, 4) where each column has been unnormalized using 
+    - torch.Tensor: Output tensor of shape (batch_size, 4) where each column has been unnormalized using
       the mean and standard deviation stored in stellar_parameter_stats.
     """
     predictions[:, 0] = unnormalize(predictions[:, 0], stellar_parameter_stats.LOGG.MEAN, stellar_parameter_stats.LOGG.STD)
@@ -156,7 +156,7 @@ def franken_load(load_path: str, chunks: int) -> OrderedDict:
             # Load each model chunk and write it to the buffer.
             for i in range(chunks):
                 load_member(load_path, file_out, i)
-        
+
         # Load the PyTorch model from the buffer.
         state_dict = torch.load(model_path, map_location=torch.device("cpu"))
 
@@ -172,7 +172,7 @@ def create_uncertainties_batch(flux: torch.Tensor, error: torch.Tensor, num_unce
     - num_uncertainty_draws: int, The number of times to draw noise samples to create a batch of flux tensors.
 
     Returns:
-    - flux_with_noise: torch.Tensor, A torch.Tensor representing the batch of flux tensors with added noise from the 
+    - flux_with_noise: torch.Tensor, A torch.Tensor representing the batch of flux tensors with added noise from the
       specified error tensors.
     """
     normal_sample = torch.randn((num_uncertainty_draws, *error.shape[-2:]))
@@ -278,7 +278,7 @@ def reverse_inverse_error(inverse_error: np.array, default_error: int) -> np.arr
     return error
 
 def open_boss_fits(file_path):
-    """ 
+    """
     The function open_boss_fits opens a BOSS FITS file and returns three torch.Tensors
     representing the flux, error, and wavelength of the data.
 
@@ -342,9 +342,9 @@ def make_prediction(spectra, error, wavlen,num_uncertainty_draws,model,device):
     rv_std = std[3].item()
 
     return log_G,log_Teff,FeH,rv,log_G_std,log_Teff_std,Feh_std,rv_std
-    
-    
-    
+
+
+
 
 from astra import task, __version__
 from astra.utils import log, expand_path
@@ -358,12 +358,12 @@ from typing import Optional, Iterable, Union
 MIN_WL, MAX_WL, FLUX_LEN = 3800, 8900, 3900
 linear_grid = torch.linspace(MIN_WL, MAX_WL, steps=FLUX_LEN)
 interpolate_flux = partial(interpolate_flux, linear_grid=linear_grid)
-interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)   
+interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)
 
 
 @task
 def bossnet(spectra: Iterable[Union[BossVisitSpectrum, BossCombinedSpectrum]], num_uncertainty_draws: Optional[int] = 20, **kwargs) -> Iterable[BossNet]:
-    
+
     model = BossNetModel()
     model_path = expand_path("$MWM_ASTRA/pipelines/BossNet/deconstructed_model")
     state_dict = franken_load(model_path, 10)
@@ -376,27 +376,27 @@ def bossnet(spectra: Iterable[Union[BossVisitSpectrum, BossCombinedSpectrum]], n
         model.cuda()
 
     if isinstance(spectra, ModelSelect):
-        # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
-        spectra = spectra.iterator()         
-    
+        # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes
+        spectra = spectra.iterator()
+
     for spectrum in spectra:
-        
+
         try:
             flux = np.nan_to_num(spectrum.flux, nan=0.0).astype(np.float32)
             e_flux = reverse_inverse_error(spectrum.ivar.astype(np.float32), np.median(flux) * 0.1).astype(np.float32)
             wavelen = spectrum.wavelength.astype(np.float32)
-            
+
             flux = torch.from_numpy(flux).float()
             e_flux = torch.from_numpy(e_flux).float()
             wavelen = torch.from_numpy(wavelen).float()
-            
+
             log_G,log_Teff,FeH,rv,log_G_std,log_Teff_std,Feh_std,rv_std = make_prediction(flux, e_flux, wavelen, num_uncertainty_draws,model,device)
         except:
-            log.exception(f"Exception when running ANet on {spectrum}")    
+            log.exception(f"Exception when running BossNet on {spectrum}")
             yield BossNet.from_spectrum(
                 spectrum,
                 flag_runtime_exception=True
-            )            
+            )
         else:
             teff = 10**log_Teff
             e_teff = 10**log_Teff * log_Teff_std * np.log(10)
@@ -411,7 +411,7 @@ def bossnet(spectra: Iterable[Union[BossVisitSpectrum, BossCombinedSpectrum]], n
                 bn_v_r=rv,
                 e_bn_v_r=rv_std,
             )
-            
+
 
 
 '''

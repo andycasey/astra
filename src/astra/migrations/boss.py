@@ -11,7 +11,7 @@ from astra.utils import log, expand_path, dict_to_iterable
 
 from peewee import (
     chunked,
-    JOIN, 
+    JOIN,
     Case,
     FloatField,
     IntegerField
@@ -23,7 +23,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
     Migrate all new BOSS visit information (`specFull` files) stored in the spAll file, which is generated
     by the SDSS-V BOSS data reduction pipeline.
     """
-    
+
     from astra.models.base import database
     from astra.models.boss import BossVisitSpectrum
     from astra.models.source import Source
@@ -39,7 +39,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/summary/daily/spAll-{run2d}.fits")
     if gzip:
         path += ".gz"
-    
+
     from astra.migrations.sdss5db.catalogdb import (
         Catalog,
         CatalogToGaia_DR2,
@@ -50,7 +50,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
     class SDSS_ID_Flat(CatalogdbModel):
         class Meta:
             table_name = "sdss_id_flat"
-            
+
     class SDSS_ID_Stacked(CatalogdbModel):
         class Meta:
             table_name = "sdss_id_stacked"
@@ -73,7 +73,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
 
         "AIRMASS": "airmass",
         "SEEING50": "seeing",
-    
+
         "OBS": "telescope",
         "MOON_DIST": "moon_dist_mean",
         "MOON_PHASE": "moon_phase_mean",
@@ -95,7 +95,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         "GAIA_ID": "gaia_dr2_source_id",
         "FIRSTCARTON": "carton_0"
     }
-    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id", "gaia_dr2_source_id", "carton_0") 
+    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id", "gaia_dr2_source_id", "carton_0")
     transformations = {
         "telescope": lambda x: f"{x.lower()}25m",
         "moon_dist_mean": lambda x: np.mean(tuple(map(float, x.split()))),
@@ -104,7 +104,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         "delta_dec": lambda x: list(map(float, x.split()))
     }
     columns = list(translations.keys())
-    
+
     spAll = fitsio.read(path, ext=1, columns=columns)
 
     most_recent_mjd = 0
@@ -135,15 +135,15 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         run2d=[run2d] * total,
         filetype=["specFull"] * total,
     )
-    for from_key, to_key in translations.items(): 
+    for from_key, to_key in translations.items():
         queue.put(dict(advance=1, description=f"Parsing BOSS {run2d} {to_key}"))
         spectrum_data_dicts[to_key] = spAll[from_key][mask]
-    
+
     queue.put(dict(description=f"Transforming BOSS {run2d} metadata", total=len(transformations), completed=0))
     for key, fun in transformations.items():
-        queue.put(dict(advance=1, description=f"Transforming BOSS {run2d} {key}")) 
+        queue.put(dict(advance=1, description=f"Transforming BOSS {run2d} {key}"))
         spectrum_data_dicts[key] = list(map(fun, spectrum_data_dicts[key]))
-    
+
     spectrum_data_dicts["fiber_offset"] = [np.any((np.abs(ra) + np.abs(dec)) > 0) for ra, dec in zip(spectrum_data_dicts["delta_ra"], spectrum_data_dicts["delta_dec"])]
 
     queue.put(dict(description=f"Converting BOSS {run2d} data types", total=None, completed=0))
@@ -186,7 +186,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
             .where(Catalog.catalogid.in_(chunk_catalogids))
             .dicts()
         )
-                
+
         reference_key = "catalogid"
         for row in q:
             if row[reference_key] in source_data:
@@ -203,7 +203,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
             if gaia_dr2_source_id < 0:
                 gaia_dr2_source_id = None
             source_data[row[reference_key]]["gaia_dr2_source_id"] = gaia_dr2_source_id
-        
+
         queue.put({"advance": batch_size})
 
     # Upsert the sources
@@ -235,7 +235,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         for catalogid in catalogids:
             source_pk_by_catalogid[catalogid] = pk
         queue.put(dict(advance=1))
-    
+
     n_warnings = 0
     for each in spectrum_data:
         try:
@@ -257,7 +257,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
 
     #if n_warnings > 0:
     #    log.warning(f"There were {n_warnings} spectra with no source_pk, probably because of missing or fake catalogids")
-    
+
     pks = upsert_many(
         BossVisitSpectrum,
         BossVisitSpectrum.pk,
@@ -286,7 +286,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
             queue.put(dict(advance=B))
             N_assigned += B
         #log.info(f"There were {N} spectra inserted and we assigned {N_assigned} spectra with new spectrum_pk values")
-    
+
     queue.put(Ellipsis)
     return None
 
@@ -306,7 +306,7 @@ def _migrate_specfull_metadata(spectra, fields, raise_exceptions=True, full_outp
     for specFull in spectra:
         path = expand_path(specFull.path)
         commands += f"{command_template.format(path=path)}\n"
-    
+
     outputs = subprocess.check_output(commands, shell=True, text=True)
     outputs = outputs.strip().split("\n")
 
@@ -337,7 +337,7 @@ def _migrate_specfull_metadata(spectra, fields, raise_exceptions=True, full_outp
             log.warning(f"Multiple key `{name}` found in {spectra[p]}: {expand_path(spectra[p].path)}")
             log.warning(f"\tKeeping existing (k, v) pair: {name}={all_metadata[pk][name]} and ignoring new value: {value}")
             continue
-        
+
         if isinstance(field, IntegerField):
             try:
                 value = int(float(value))
@@ -350,7 +350,7 @@ def _migrate_specfull_metadata(spectra, fields, raise_exceptions=True, full_outp
                 value = np.nan
 
         all_metadata[pk][name] = value
-        
+
     missing_key_counts, examples = ({}, {})
     for pk, meta in all_metadata.items():
         for field, from_key in fields.items():
@@ -360,7 +360,7 @@ def _migrate_specfull_metadata(spectra, fields, raise_exceptions=True, full_outp
                 examples[field.name] = pk
 
     #if missing_key_counts:
-    #    log.warning(f"There are missing keys in some spectra:")    
+    #    log.warning(f"There are missing keys in some spectra:")
     #    for key, count in missing_key_counts.items():
     #        log.warning(f"\t{key} is missing in {count} spectra in this batch. Example pk={examples[key]}")
 
@@ -387,9 +387,9 @@ def migrate_specfull_metadata_from_image_headers(
         .where(BossVisitSpectrum.alt.is_null())# & (BossVisitSpectrum.catalogid > 0))
         .limit(limit)
     )
-    
+
     fields = {
-        BossVisitSpectrum.plateid: "PLATEID", 
+        BossVisitSpectrum.plateid: "PLATEID",
         BossVisitSpectrum.cartid: "CARTID",
         BossVisitSpectrum.mapid: "MAPID",
         BossVisitSpectrum.slitid: "SLITID",
@@ -441,7 +441,7 @@ def migrate_specfull_metadata_from_image_headers(
         for spec in chunk:
             specFulls[spec.pk] = spec
         queue.put(dict(advance=len(chunk)))
-        
+
     queue.put(dict(total=len(futures), completed=0, description="Parsing specFull metadata"))
     for future in concurrent.futures.as_completed(futures):
         metadata, missing_counts = future.result()
@@ -455,7 +455,7 @@ def migrate_specfull_metadata_from_image_headers(
             for key, value in defaults.items():
                 if key not in meta:
                     setattr(specFulls[pk], key, value)
-        
+
         queue.put(dict(advance=1))
 
     #if all_missing_counts:
@@ -466,14 +466,14 @@ def migrate_specfull_metadata_from_image_headers(
     queue.put(dict(total=len(specFulls), completed=0, description="Ingesting specFull metadata"))
     for chunk in chunked(specFulls.values(), batch_size):
         (
-            BossVisitSpectrum  
+            BossVisitSpectrum
             .bulk_update(
                 chunk,
                 fields=list(fields.keys())
             )
         )
         queue.put(dict(advance=batch_size))
-    
+
     queue.put(Ellipsis)
 
     return None

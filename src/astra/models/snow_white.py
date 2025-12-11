@@ -8,11 +8,11 @@ from astra.fields import (
     IntegerField,
     PixelArray, BitField, LogLambdaArrayAccessor,
     BasePixelArrayAccessor
-)    
+)
 from astra.models.pipeline import PipelineOutputModel
 
 class IntermediatePixelArrayAccessor(BasePixelArrayAccessor):
-    
+
     def __get__(self, instance, instance_type=None):
         if instance is not None:
             try:
@@ -23,9 +23,9 @@ class IntermediatePixelArrayAccessor(BasePixelArrayAccessor):
 
                 with fits.open(expand_path(instance.intermediate_output_path)) as image:
                     model_flux = image[1].data
-                
+
                 instance.__pixel_data__.setdefault("model_flux", model_flux)
-                
+
                 return instance.__pixel_data__[self.name]
 
         return self.field
@@ -34,7 +34,7 @@ class IntermediatePixelArrayAccessor(BasePixelArrayAccessor):
 
 
 class IntermediatePixelArray(PixelArray):
-    
+
     def __init__(self, ext=None, column_name=None, transform=None, accessor_class=IntermediatePixelArrayAccessor, help_text=None, **kwargs):
         super(IntermediatePixelArray, self).__init__(
             ext=ext,
@@ -79,18 +79,18 @@ class SnowWhite(PipelineOutputModel):
     p_dzba = FloatField(null=True)
     p_mwd = FloatField(null=True)
     p_hotdq = FloatField(null=True)
-    
+
     #> Stellar Parameters
     teff = FloatField(null=True)
     e_teff = FloatField(null=True)
     logg = FloatField(null=True)
     e_logg = FloatField(null=True)
     v_rel = FloatField(null=True, help_text="Relative velocity used in stellar parameter fit [km/s]")
-    
+
     #> Formal uncertainties
     raw_e_teff = FloatField(null=True)
     raw_e_logg = FloatField(null=True)
-    
+
     #> Metadata
     result_flags = BitField(default=0)
     flag_low_snr = result_flags.flag(2**0, help_text="Results are suspect because S/N <= 8")
@@ -98,6 +98,7 @@ class SnowWhite(PipelineOutputModel):
     flag_teff_grid_edge_bad = result_flags.flag(2**2, help_text="TEFF is edge of grid")
     flag_logg_grid_edge_bad = result_flags.flag(2**3, help_text="LOGG is edge of grid")
     flag_no_flux = result_flags.flag(2**4, help_text="Spectrum has no flux")
+    flag_not_mwm_wd = result_flags.flag(2**5, help_text="Object is not in the `mwm_wd` program")
 
     #> Spectral Data
     wavelength = PixelArray(
@@ -107,7 +108,7 @@ class SnowWhite(PipelineOutputModel):
             cdelt=1e-4,
             naxis=4648,
         ),
-    )    
+    )
     model_flux = IntermediatePixelArray(ext=1)
 
     @property
@@ -118,7 +119,7 @@ class SnowWhite(PipelineOutputModel):
 
 
 def apply_noise_model():
-    
+
     (
         SnowWhite
         .update(e_teff=1.5 * SnowWhite.raw_e_teff + 100)

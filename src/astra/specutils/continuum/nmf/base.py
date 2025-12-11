@@ -2,7 +2,7 @@
 import numpy as np
 import warnings
 import pickle
-from astra.utils import expand_path
+from astra.utils import expand_path, log
 from functools import cache
 from typing import Optional, Tuple
 from scipy import optimize as op
@@ -10,7 +10,7 @@ from sklearn.decomposition._nmf import _fit_coordinate_descent
 from sklearn.exceptions import ConvergenceWarning
 
 @cache
-def load_components(path, P, pad=0):    
+def load_components(path, P, pad=0):
     with open(expand_path(path), "rb") as fp:
         masked_components = pickle.load(fp)
     if pad > 0:
@@ -29,7 +29,7 @@ class BaseNMFSinusoidsContinuum(object):
         deg: int,
         L: float,
         regions: Optional[Tuple[Tuple[float, float]]] = None
-    ):       
+    ):
         self.dispersion = dispersion
         _check_dispersion_components_shape(dispersion, components)
 
@@ -38,9 +38,9 @@ class BaseNMFSinusoidsContinuum(object):
         self.deg = deg
         self.L = L
         self.n_regions = len(regions)
-        
+
         A = np.zeros(
-            (self.dispersion.size, self.n_regions * self.n_parameters_per_region), 
+            (self.dispersion.size, self.n_regions * self.n_parameters_per_region),
             dtype=float
         )
         self.region_masks = region_slices(self.dispersion, self.regions)
@@ -62,13 +62,13 @@ class BaseNMFSinusoidsContinuum(object):
     def n_parameters_per_region(self):
         return 2 * self.deg + 1
 
-    def _theta_step(self, flux, ivar, rectified_flux):        
+    def _theta_step(self, flux, ivar, rectified_flux):
         N, P = flux.shape
-        theta = np.zeros((N, self.n_regions, self.n_parameters_per_region))
+        theta = np.nan * np.ones((N, self.n_regions, self.n_parameters_per_region))
         continuum = np.nan * np.ones_like(flux)
         continuum_flux = flux / rectified_flux
         continuum_ivar = ivar * rectified_flux**2
-        for i in range(N):            
+        for i in range(N):
             #for j, (A, mask) in enumerate(zip(*self._dmm)):
             for j, mask in enumerate(self.region_masks):
                 sj, ej = (j * self.n_parameters_per_region, (j + 1) * self.n_parameters_per_region)
@@ -80,9 +80,11 @@ class BaseNMFSinusoidsContinuum(object):
                 try:
                     theta[i, j] = np.linalg.solve(MTM, MTy)
                 except np.linalg.LinAlgError:
-                    if np.any(continuum_ivar[i, mask] > 0):
-                        raise
-                continuum[i, mask] = A @ theta[i, j]        
+                    log.warning(f"LinAlgError when trying to solve for theta for spectrum {i}, region {j}")
+                    #if np.any(continuum_ivar[i, mask] > 0):
+                    #    raise
+                else:
+                    continuum[i, mask] = A @ theta[i, j]
 
         return (theta, continuum)
 
@@ -90,10 +92,10 @@ class BaseNMFSinusoidsContinuum(object):
     def _W_step(self, mean_rectified_flux, W, **kwargs):
         absorption = 1 - mean_rectified_flux
         use = np.zeros(mean_rectified_flux.size, dtype=bool)
-        use[np.hstack(self.region_masks)] = True    
+        use[np.hstack(self.region_masks)] = True
         use *= (
-            np.isfinite(absorption) 
-        &   (absorption >= 0) 
+            np.isfinite(absorption)
+        &   (absorption >= 0)
         &   (mean_rectified_flux > 0)
         )
         W_next, _, n_iter = _fit_coordinate_descent(
@@ -103,7 +105,7 @@ class BaseNMFSinusoidsContinuum(object):
             update_H=False,
             verbose=False,
             shuffle=True
-        )        
+        )
         rectified_model_flux = 1 - (W_next @ self.components)[0]
         return (W_next, rectified_model_flux, np.sum(use), n_iter)
 
@@ -126,13 +128,13 @@ class BaseNMFSinusoidsContinuum(object):
                     flux,
                     ivar,
                     rectified_flux,
-                )                
+                )
                 mean_rectified_flux = np.sum((flux / continuum) * ivar, axis=0) / ivar_sum
                 mean_rectified_flux[no_data] = 0.0
                 W, rectified_flux, n_pixels_used, n_iter = self._W_step(mean_rectified_flux, W)
                 chi_sqs.append(np.nansum((flux - rectified_flux * continuum)**2 * ivar))
                 if iteration > 0 and (chi_sqs[-1] > chi_sqs[-2]):
-                    break            
+                    break
 
                 thetas.append(np.hstack([W.flatten(), theta.flatten()]))
 
@@ -141,26 +143,26 @@ class BaseNMFSinusoidsContinuum(object):
 
     def continuum(self, wavelength, theta):
         C, P = self.components.shape
-        
+
         A = np.zeros(
-            (wavelength.size, self.n_regions * self.n_parameters_per_region), 
+            (wavelength.size, self.n_regions * self.n_parameters_per_region),
             dtype=float
         )
         for i, mask in enumerate(self.region_masks):
             si = i * self.n_parameters_per_region
             ei = (i + 1) * self.n_parameters_per_region
             A[mask, si:ei] = design_matrix(wavelength[mask], self.deg, self.L).T
-        
+
         return (A @ theta).reshape((-1, P))
 
     def _predict(self, theta, A_slice, C, P):
         return (1 - theta[:C] @ self.components) * (A_slice @ theta[C:]).reshape((-1, P))
 
-            
-    
+
+
     def __call__(self, theta, A_slice=None, full_output=False):
         C, P = self.components.shape
-        
+
         if A_slice is None:
             T = len(theta)
             R = self.n_regions
@@ -175,9 +177,9 @@ class BaseNMFSinusoidsContinuum(object):
         if not full_output:
             return flux
         return (flux, rectified_flux, continuum)
-    
 
-    def full_design_matrix(self, N):        
+
+    def full_design_matrix(self, N):
         C, P = self.components.shape
         R = len(self.regions)
 
@@ -189,16 +191,16 @@ class BaseNMFSinusoidsContinuum(object):
         return A
 
     def get_mask(self, ivar):
-        N, P = np.atleast_2d(ivar).shape        
+        N, P = np.atleast_2d(ivar).shape
         use = np.zeros((N, P), dtype=bool)
         use[:, np.hstack(self.region_masks)] = True
         use *= (ivar > 0)
         return ~use
 
-    
+
 
     def get_initial_guess_with_small_W(self, flux, ivar, A=None, small=1e-12):
-        with warnings.catch_warnings():        
+        with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             N, P = flux.shape
@@ -211,20 +213,20 @@ class BaseNMFSinusoidsContinuum(object):
                 Y[use],
                 bounds=self.get_bounds(N, [-np.inf, 0]),
             )
-            
+
             C, P = self.components.shape
             return np.hstack([small * np.ones(C), result.x[C:]])
-                    
+
 
     def get_initial_guess_by_linear_least_squares_with_bounds(self, flux, ivar, A=None):
-        with warnings.catch_warnings():        
+        with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
 
             N, P = flux.shape
             if A is None:
                 A = self.full_design_matrix(N)
             Y = flux.flatten()
-            use = ~self.get_mask(ivar).flatten()            
+            use = ~self.get_mask(ivar).flatten()
             result = op.lsq_linear(
                 A[use],
                 Y[use],
@@ -234,21 +236,21 @@ class BaseNMFSinusoidsContinuum(object):
             continuum = (A[:, C:] @ result.x[C:]).reshape(flux.shape)
 
             mean_rectified_flux, _ = self.get_mean_rectified_flux(flux, ivar, continuum)
-            W_next, *_ = self._W_step(mean_rectified_flux, result.x[:C].astype(np.float64).reshape((1, C))) #np.zeros((1, C), dtype=np.float64))        
+            W_next, *_ = self._W_step(mean_rectified_flux, result.x[:C].astype(np.float64).reshape((1, C))) #np.zeros((1, C), dtype=np.float64))
             return np.hstack([W_next.flatten(), result.x[C:]])
 
 
     def get_mean_rectified_flux(self, flux, ivar, continuum):
         """
         Compute a mean rectified spectrum, given an estimate of the contiuum.
-        
+
         :param flux:
             A (N, P) shape array of flux values.
-        
+
         :param ivar:
             A (N, P) shape array of inverse variances on flux values.
-        
-        :param continuum: 
+
+        :param continuum:
             A (N, P) shape array of estimated continuum fluxes.
         """
         N, P = flux.shape
@@ -260,7 +262,7 @@ class BaseNMFSinusoidsContinuum(object):
             mean_rectified_flux = np.sum((flux / continuum) * ivar, axis=0) / ivar_sum
         no_data = ivar_sum == 0
         mean_rectified_flux[no_data] = 0.0
-        mean_rectified_ivar = np.mean(ivar * continuum**2, axis=0)        
+        mean_rectified_ivar = np.mean(ivar * continuum**2, axis=0)
         return (mean_rectified_flux, mean_rectified_ivar)
 
 
@@ -281,26 +283,26 @@ class BaseNMFSinusoidsContinuum(object):
                 )
             else:
                 x0_callables = [lambda *_: x0]
-        
+
             # build a mas using ivar and region masks
             use = ~self.get_mask(ivar).flatten()
             with np.errstate(divide="ignore", invalid="ignore"):
                 sigma = ivar**-0.5
-            
+
             C, P = self.components.shape
             A_slice = A[:, C:]
-            
+
             def f(_, *params):
-                
+
                 return self._predict(params, A_slice=A_slice, C=C, P=P).flatten()[use]
                 #chi2 = (r - flux.flatten()[use]) * ivar.flatten()[use]
                 #print(np.nansum(chi2))#, *params)
                 #return r
-                
-            
+
+
             for x0_callable in x0_callables:
                 x0 = x0_callable(flux, ivar, A)
-                try:                            
+                try:
                     p_opt, cov = op.curve_fit(
                         f,
                         None,
@@ -315,7 +317,7 @@ class BaseNMFSinusoidsContinuum(object):
                     break
             else:
                 raise RuntimeError(f"Optimization failed")
-            
+
             model_flux, rectified_model_flux, continuum = self(p_opt, full_output=True)
 
             chi2 = ((model_flux - flux)**2 * ivar).flatten()
@@ -342,13 +344,13 @@ class BaseNMFSinusoidsContinuum(object):
 
 
     def get_bounds(self, N, component_bounds=(0, +np.inf)):
-        C, P = self.components.shape          
+        C, P = self.components.shape
         A = N * self.n_regions * (self.n_parameters_per_region)
 
         return np.vstack([
             np.tile(component_bounds, C).reshape((C, 2)),
             np.tile([-np.inf, +np.inf], A).reshape((-1, 2))
-        ]).T            
+        ]).T
 
 
 
@@ -380,7 +382,7 @@ def _check_and_reshape_flux_ivar(dispersion, flux, ivar):
 
 def _check_dispersion_components_shape(dispersion, components):
     P = dispersion.size
-    assert dispersion.ndim == 1, "Dispersion must be a one-dimensional array." 
+    assert dispersion.ndim == 1, "Dispersion must be a one-dimensional array."
     C, P2 = components.shape
     assert P == P2, "`components` should have shape (C, P) where P is the size of `dispersion`"
 
@@ -398,8 +400,3 @@ def design_matrix(dispersion: np.array, deg: int, L: float) -> np.array:
             ).reshape((2 * deg, dispersion.size)),
         ]
     )
-
-
-
-
-

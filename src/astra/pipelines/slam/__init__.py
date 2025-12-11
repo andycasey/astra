@@ -16,69 +16,54 @@ from astra.models import BossCombinedSpectrum
 from astra.models.slam import Slam
 from astropy.table import Table
 from typing import Iterable, Optional
-from astra.models import SpectrumMixin, Source
-#  
+from astra.models import Source
+#
 #  According to the Bible, we’re roughly dealing with an absolute magnitude range M_G in [7.57, 13.35] for M dwarfs between 4000 and 3000 K. It might be worth including this cut when training/running the SLAM
 @task
 def slam(
-    spectra: Optional[Iterable[SpectrumMixin]] = (
-        BossCombinedSpectrum
-        .select()
-        .join(Source)
-        .switch(BossCombinedSpectrum)
-        .join(
-            Slam, 
-            JOIN.LEFT_OUTER, 
-            on=(
-                (Slam.spectrum_pk == BossCombinedSpectrum.spectrum_pk)
-            &   (Slam.v_astra == __version__)
-            )
-        )
-        .where(
-            Slam.spectrum_pk.is_null()
-        &   (                
-                (
-                    # From Zach Way, mwm-astra 413
-                    Source.g_mag.is_null(False)
-                &   Source.rp_mag.is_null(False)
-                &   Source.plx.is_null(False)
-                &   (Source.plx > 0)
-                &   ((Source.g_mag - Source.rp_mag) > 0.56)
-                &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
-                #&   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 7.57)
-                )
-            |   (
-                Source.assigned_to_program("mwm_yso")
-            |   Source.assigned_to_program("mwm_snc")
-            )
-        )
-        &   (BossCombinedSpectrum.v_astra == __version__)
-        )
-    ), 
+    spectra: Iterable[BossCombinedSpectrum],
     page=None,
     limit=None,
-    n_jobs=128
+    n_jobs=128,
+    **kwargs
 ) -> Slam:
-
-    if isinstance(spectra, ModelSelect) and limit is not None:
-        if page is not None:
-            print("paging")
-            spectra = spectra.paginate(page, limit)
-        else:
-            print("limiting")
-            spectra = spectra.limit(limit)
 
     wave_interp = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/dM_train_wave_standard.csv"))['wave']
     dump_path = expand_path("$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump")
 
     import sys
-    sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/")
+    #sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/")
+    sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/sdss50/software/git/sdss/astra/0.7.0/src/astra/pipelines/")
+    import sklearn.metrics
+    from sklearn.metrics._scorer import _SCORERS
     Pre = load(dump_path)
+    sys.path.pop(0)
 
     flux_boss = []
     ivar_boss = []
     used_spectra = []
     for spectrum in tqdm(spectra, desc="Collecting"):
+
+        source = spectrum.source
+
+        if not (
+            (
+                    # From Zach Way, mwm-astra 413
+                    source.g_mag.is_null(False)
+                &   source.rp_mag.is_null(False)
+                &   source.plx.is_null(False)
+                &   (source.plx > 0)
+                &   ((source.g_mag - source.rp_mag) > 0.56)
+                &   ((source.g_mag + 5 + 5 * fn.log10(source.plx/1000)) > 5.553)
+                #&   ((source.g_mag + 5 + 5 * fn.log10(source.plx/1000)) > 7.57)
+                )
+            |   (
+                source.assigned_to_program("mwm_yso")
+            |   source.assigned_to_program("mwm_snc")
+            )
+        ):
+            continue
+
         # only redshift if it is a visit spectrum (not a stack)
         try:
             if isinstance(spectrum, BossCombinedSpectrum):
@@ -86,8 +71,8 @@ def slam(
             else:
                 wave = spectrum.wavelength / (1 + spectrum.xcsao_v_rad / 299792.458)
             flux_n, invar_n = rebin(
-                wave, 
-                flux=spectrum.flux, 
+                wave,
+                flux=spectrum.flux,
                 flux_err=spectrum.e_flux,
                 wave_new=wave_interp
             )
@@ -103,10 +88,10 @@ def slam(
 
     print("normalizing spectra block")
     flux_norm, flux_cont = normalize_spectra_block(
-        wave_interp, flux_boss, 
-        (6001.755, 8957.321), 
-        10., 
-        p=(1E-8, 1E-7), 
+        wave_interp, flux_boss,
+        (6001.755, 8957.321),
+        10.,
+        p=(1E-8, 1E-7),
         #ivar_block=ivar_boss, # Dan doesn't use this, but there is an option for it.
         q=0.7, eps=1E-19, rsv_frac=2., n_jobs=n_jobs, verbose=5
     )
@@ -203,7 +188,7 @@ if __name__ == "__main__":
 
     from astra.pipelines.slam import slam
     results = list(slam(spectra))
-    
+
     # match up to the rows in the table
     import numpy as np
     spectrum_pks = np.array([r.spectrum_pk for r in results])
@@ -243,19 +228,14 @@ if __name__ == "__main__":
         ax.plot(limits, limits, c="k", ls="--")
         ax.set_xlim(limits)
         ax.set_ylim(limits)
-    
+
 
 
     raise a
-    
+
 
     before = list(Slam.select().where(Slam.v_astra == "0.6.0").where(Slam.spectrum_pk.in_([s.spectrum_pk for s in spectra])))
     after = list(slam(spectra))
 
     index = np.argsort([s.spectrum_pk for s in spectra])
     before_sorted = [before[i] for i in index]
-
-
-
-
-    

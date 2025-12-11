@@ -5,6 +5,7 @@ from astra.models.apogee import (
     ApogeeVisitSpectrumInApStar,
 )
 from astra.models.boss import BossVisitSpectrum
+from astra.models.mwm import BossCombinedSpectrum
 """
 from astra.models.apogeenet import ApogeeNet
 from astra.models.apogeenet_v2 import ApogeeNetV2

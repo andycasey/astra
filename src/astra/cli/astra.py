@@ -26,6 +26,7 @@ class Product(str, Enum):
     astraAllStarAstroNN = "astraAllStarAstroNN"
     astraAllVisitAstroNN = "astraAllVisitAstroNN"
     astraAllStarAstroNNDist = "astraAllStarAstroNNDist"
+    astraAllStarSlam = "astraAllStarSlam"
 
 
 
@@ -33,7 +34,7 @@ class Product(str, Enum):
 def version():
     """Print the version of Astra."""
     from astra import __version__
-    typer.echo(f"Astra version: {__version__}")    
+    typer.echo(f"Astra version: {__version__}")
 
 
 @app.command()
@@ -41,8 +42,8 @@ def create(
     products: Annotated[List[Product], typer.Argument(help="The product name(s) to create.")],
     overwrite: Annotated[bool, typer.Option(help="Overwrite the product if it already exists.")] = False,
     limit: Annotated[int, typer.Option(help="Limit the number of rows per product.", min=1)] = None,
-):    
-    """Create an Astra summary product."""    
+):
+    """Create an Astra summary product."""
     from astra.products.mwm_summary import (
         create_mwm_targets_product,
         create_mwm_all_star_product,
@@ -53,11 +54,11 @@ def create(
     from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
     from astra.models.boss import BossVisitSpectrum
     from astra.models.mwm import (BossCombinedSpectrum, ApogeeCombinedSpectrum, BossRestFrameVisitSpectrum, ApogeeRestFrameVisitSpectrum)
-    
+
     mwmVisit_mwmStar_args = (
-        run, 
+        run,
         dict(
-            task="astra.products.mwm.create_mwmVisit_and_mwmStar_products", 
+            task="astra.products.mwm.create_mwmVisit_and_mwmStar_products",
             batch_size=1,
             overwrite=overwrite
         )
@@ -71,7 +72,7 @@ def create(
             Product.mwmAllVisit: (create_mwm_all_visit_product, dict(overwrite=overwrite)),
             Product.mwmAllStar: (create_mwm_all_star_product, dict(overwrite=overwrite)),
             Product.astraAllStarASPCAP: (
-                create_all_star_product, 
+                create_all_star_product,
                 {
                     "pipeline_model": "aspcap.ASPCAP",
                     "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
@@ -149,9 +150,17 @@ def create(
                     "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
                     "overwrite": overwrite
                 }
+            ),
+            Product.astraAllStarSlam: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "slam.Slam",
+                    "boss_spectrum_model": BossCombinedSpectrum,
+                    "overwrite": overwrite
+                }
             )
         }
-    )    
+    )
 
     for product in products:
         fun, kwargs = mapping[product]
@@ -230,7 +239,7 @@ def srun(
     else:
         log.info(f"No {', or '.join([m.__name__ for m in considered_models])} spectra to process.")
         sys.exit(0)
-    
+
     workers = nodes * procs
     limit = int(np.ceil(total / workers))
     today = datetime.now().strftime("%Y-%m-%d")
@@ -248,7 +257,7 @@ def srun(
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         )
         live_renderable.add_row(Panel(overall_progress, title=task))
-    
+
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
         log.handlers.clear()
         log.handlers.extend([
@@ -264,7 +273,7 @@ def srun(
         futures = []
         with concurrent.futures.ProcessPoolExecutor(nodes) as executor:
             # Load a whole bunch of sruns in processes
-            td = mkdtemp(dir=expand_path("$PBS"), prefix=f"{task}-{today}-")    
+            td = mkdtemp(dir=expand_path("$PBS"), prefix=f"{task}-{today}-")
             log.info(f"Working directory: {td}")
 
             status_path_locks = {}
@@ -319,7 +328,7 @@ def srun(
                     executable.append(f"--mem={mem}")
                 if gres is not None:
                     executable.append(f"--gres={gres}")
-                
+
                 executable.extend(["bash", "-c", f"{script_path}"])
 
                 futures.append(
@@ -329,7 +338,7 @@ def srun(
                         capture_output=True
                     )
                 )
-                    
+
             max_returncode, mappings = (0, {})
             while len(futures):
                 try:
@@ -342,7 +351,7 @@ def srun(
 
                 for progress, kwds in status_path_locks.items():
                     for path, skip in kwds.items():
-                        
+
                         # copy the contents to a temp file
                         try:
                             with open(path, "r") as fp:
@@ -354,9 +363,9 @@ def srun(
                         except:
                             # no content
                             continue
-                        
+
                         kwds[path] += len(content)
-                            
+
                         for line in content:
                             try:
                                 command, *state = json.loads(line.rstrip())
@@ -400,8 +409,8 @@ def run(
         else:
             sdss_ids.append(spectrum_model)
         spectrum_model = None
-            
-    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
+
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn
     from rich.live import Live
     from rich.panel import Panel
     from rich.table import Table
@@ -431,14 +440,14 @@ def run(
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         )
         live_renderable.add_row(Panel(overall_progress, title=task))
-    
+
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
         #log.handlers.clear()
         #log.handlers.extend([
         #    RichHandler(console=live.console, markup=True, rich_tracebacks=True),
         #])
 
-        for model, q in generate_queries_for_task(fun, spectrum_model, sdss_ids=sdss_ids, limit=limit, page=page):            
+        for model, q in generate_queries_for_task(fun, spectrum_model, sdss_ids=sdss_ids, limit=limit, page=page):
             if total := q.count():
                 if use_local_renderable:
                     task = overall_progress.add_task(model.__name__, total=total)
@@ -463,7 +472,7 @@ def run(
         TimeRemainingColumn(),
         transient=not in_airflow_context
     ) as progress:
-        
+
         for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):
             t = progress.add_task(description=f"Running {fun.__name__} on {model.__name__}", total=limit)
             total = q.count()
@@ -481,7 +490,7 @@ def run(
 def wrapper(target, *args, **kwargs):
     try:
         r = target(*args, **kwargs)
-    except Exception as e:                    
+    except Exception as e:
         q = kwargs.get("queue", None)
         e.add_note(f"\n\nRaised in {target.__name__}()")
         if q is not None:
@@ -490,6 +499,7 @@ def wrapper(target, *args, **kwargs):
         q = kwargs.get("queue", None)
         if q is not None:
             q.put(Ellipsis)
+
 
 @app.command()
 def migrate(
@@ -506,7 +516,7 @@ def migrate(
     import os
     import multiprocessing as mp
     from signal import SIGKILL
-    
+
     # Set multiprocessing start method to avoid logger inheritance
     try:
         mp.set_start_method('fork', force=True)
@@ -516,7 +526,7 @@ def migrate(
             mp.set_start_method('spawn', force=True)
         except RuntimeError:
             pass  # Already set
-    
+
     from rich.console import Console
     from rich.progress import Text, Progress, SpinnerColumn, Text, TextColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn, BarColumn, MofNCompleteColumn as _MofNCompleteColumn
     from rich.logging import RichHandler
@@ -561,7 +571,7 @@ def migrate(
     from astra.migrations.misc import (
         compute_f_night_time_for_boss_visits,
         compute_f_night_time_for_apogee_visits,
-        update_visit_spectra_counts,       
+        update_visit_spectra_counts,
         compute_n_neighborhood,
         update_galactic_coordinates,
         compute_w1mag_and_w2mag,
@@ -579,7 +589,7 @@ def migrate(
     else:
         console = Console()
 
-    
+
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -588,7 +598,7 @@ def migrate(
         TimeElapsedColumn(),
         TimeRemainingColumn(),
     )
-    
+
     def create_live_renderable():
         """Create the live renderable layout"""
         return Panel(progress, title="Migration Progress", border_style="blue")
@@ -615,7 +625,7 @@ def migrate(
 
             import time
             last_update = 0
-            
+
             def update_display_throttled():
                 """Update display, but not more than once per second"""
                 nonlocal last_update
@@ -623,11 +633,11 @@ def migrate(
                 if current_time - last_update > 1.0:  # Update at most once per second
                     update_display()
                     last_update = current_time
-                
+
             if apred is not None or run2d is not None:
                 if apred is not None:
                     if apred == "dr17":
-                        from astra.migrations.new_apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb 
+                        from astra.migrations.new_apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb
                         ptq.append(process_task(migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, description="Ingesting APOGEE dr17 spectra"))
                     else:
                         ptq.append(
@@ -641,7 +651,7 @@ def migrate(
                         )
                 if run2d is not None:
                     ptq.append(process_task(migrate_from_spall_file, run2d, description=f"Ingesting BOSS {run2d} spectra"))
-                     
+
                 awaiting = set(t for p, t, q in ptq)
                 while awaiting:
                     for p, t, q in ptq:
@@ -654,7 +664,7 @@ def migrate(
                                 progress.update(t, visible=False)
                             elif isinstance(r, Exception):
                                 log.exception(r)
-                                raise r                                
+                                raise r
                             else:
                                 progress.update(t, **r)
                                 if "completed" in r and r.get("completed", None) == 0:
@@ -662,10 +672,10 @@ def migrate(
                                     progress.reset(t)
                         except mp.queues.Empty:
                             pass
-                    
+
                     # Update log display periodically
                     update_display_throttled()
-            
+
             # Now that we have sources and spectra, we can do other things.
             if metadata:
                 ptq = [
@@ -684,16 +694,16 @@ def migrate(
                     process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),
                     process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
                     process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
-                    process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
+                    process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),
                     process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),
                 ]
-                # reddening needs unwise, 2mass, glimpse, 
+                # reddening needs unwise, 2mass, glimpse,
                 task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
                 # These need to be run in sequence
                 additional_gaia_task_partials = [
                     (migrate_gaia_dr3_astrometry_and_photometry, dict(description="Ingesting Gaia DR3 astrometry and photometry")),
                     (migrate_zhang_stellar_parameters, dict(description="Ingesting Zhang stellar parameters")),
-                    (migrate_bailer_jones_distances, dict(description="Ingesting Bailer-Jones distances")), 
+                    (migrate_bailer_jones_distances, dict(description="Ingesting Bailer-Jones distances")),
                     (migrate_gaia_synthetic_photometry, dict(description="Ingesting Gaia synthetic photometry")),
                     (compute_n_neighborhood, dict(description="Computing n_neighborhood")),
                 ]
@@ -720,8 +730,8 @@ def migrate(
                                     additional_tasks.append(new_task)
                                     ptq_gaia.append(new_task)
                                     if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
-                                        reddening_requires.update({new_task})                                        
-                                            
+                                        reddening_requires.update({new_task})
+
                                 if t == task_specfull:
                                     additional_tasks.append(
                                         process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
@@ -747,11 +757,11 @@ def migrate(
 
                     ptq.extend(additional_tasks)
                     awaiting |= set(t for p, t, q in additional_tasks)
-                    
+
                     # Update log display periodically
                     update_display_throttled()
 
-    except KeyboardInterrupt:  
+    except KeyboardInterrupt:
         """
         with silenced():
             import psutil
@@ -775,12 +785,12 @@ def grant_permissions(
         f"grant all privileges on schema {schema} to group {group};"
         f"grant all privileges on all tables in schema {schema} to {group};"
     )
-    
+
 
 
 @app.command()
 def init(
-    drop_tables: Optional[bool] = typer.Option(False, help="Drop tables if they exist."), 
+    drop_tables: Optional[bool] = typer.Option(False, help="Drop tables if they exist."),
     delay: Optional[int] = typer.Option(10, help="Delay in seconds to wait.")
 ):
     """Initialize the Astra database."""
@@ -812,12 +822,12 @@ def init(
         )
         for package in init_model_packages:
             import_module(f"astra.models.{package}")
-        
+
         models = (
             set(BaseModel.__subclasses__())
         |   set(PipelineOutputModel.__subclasses__())
         ) - {PipelineOutputModel}
-        
+
         if drop_tables:
             tables_to_drop = [m for m in models if m.table_exists()]
             if delay > 0:
@@ -825,7 +835,7 @@ def init(
                 for i in range(delay):
                     progress.advance(t)
                     sleep(1)
-        
+
             with database.atomic():
                 database.drop_tables(tables_to_drop, cascade=True)
             progress.remove_task(t)
@@ -835,6 +845,6 @@ def init(
             database.create_tables(models)
 
     typer.echo(f"Created {len(models)} tables in the Astra database.")
-    
+
 if __name__ == "__main__":
     app()

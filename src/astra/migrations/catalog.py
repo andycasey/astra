@@ -21,7 +21,7 @@ def ensure_sdss_id_rank(queue=None):
         class Meta:
             table_name = "sdss_id_flat"
 
-    source_pks = { 
+    source_pks = {
         sdss_id: pk \
         for pk, sdss_id in (
             Source
@@ -81,14 +81,14 @@ def ensure_sdss_id_rank(queue=None):
     # Then next time the pipelines are run, they will analyse the spectra that
     # don't yet have results.
     from astra.models.apogee import (
-        ApogeeCoaddedSpectrumInApStar, 
-        ApogeeVisitSpectrum, 
+        ApogeeCoaddedSpectrumInApStar,
+        ApogeeVisitSpectrum,
         ApogeeVisitSpectrumInApStar
     )
     from astra.models.boss import BossVisitSpectrum
     spectrum_models = (
-        BossVisitSpectrum, 
-        ApogeeVisitSpectrum, 
+        BossVisitSpectrum,
+        ApogeeVisitSpectrum,
         ApogeeVisitSpectrumInApStar,
         ApogeeCoaddedSpectrumInApStar
     )
@@ -112,7 +112,7 @@ def ensure_sdss_id_rank(queue=None):
                 .where(model.source_pk == old_pk)
                 .execute()
             )
-            
+
         for model in pipeline_models:
             (
                 model
@@ -120,7 +120,7 @@ def ensure_sdss_id_rank(queue=None):
                 .where(model.source_pk == old_pk)
                 .execute()
             )
-        
+
         # ASPCAP is a special one, we must delete it because it references
         # spectrum_pk and source_pk in the intermediate files
         (
@@ -147,14 +147,14 @@ def migrate_healpix(
     Migrate HEALPix values for any sources that have positions, but no HEALPix assignment.
 
     :param batch_size: [optional]
-        The batch size to use when upserting data.    
-    
+        The batch size to use when upserting data.
+
     :param limit: [optional]
         Limit the initial catalog queries for testing purposes.
-    
+
     :param nside: [optional]
         The number of sides to use for the HEALPix map.
-    
+
     :param lonlat: [optional]
         The HEALPix map is oriented in longitude and latitude coordinates.
     """
@@ -164,7 +164,7 @@ def migrate_healpix(
     from healpy import ang2pix
     if queue is None:
         queue = NoQueue()
-    
+
     q = (
         Source
         .select(
@@ -178,8 +178,8 @@ def migrate_healpix(
         &   Source.dec.is_null(False)
         )
         .limit(limit)
-    )    
-    
+    )
+
     updated, total = (0, limit or q.count())
     queue.put(dict(description="Migrating HEALPix values", total=total, completed=0))
     for batch in chunked(q.iterator(), batch_size):
@@ -199,7 +199,7 @@ def migrate_healpix(
 
 
 def migrate_bailer_jones_distances(
-    batch_size=500, 
+    batch_size=500,
     limit=None,
     queue=None
 ):
@@ -218,7 +218,7 @@ def migrate_bailer_jones_distances(
             (Source.r_med_geo.is_null() & Source.gaia_dr3_source_id.is_null(False) & (Source.gaia_dr3_source_id > 0))
         )
     )
-        
+
     q = (
         q
         .order_by(Source.gaia_dr3_source_id.asc())
@@ -254,9 +254,9 @@ def migrate_bailer_jones_distances(
             for key, value in record.items():
                 if value is not None:
                     setattr(source, key, value)
-            
+
             update.append(source)
-        
+
         if len(update) > 0:
             fields = []
             consider_keys = ("r_med_geo", "r_lo_geo", "r_hi_geo", "r_med_photogeo", "r_lo_photogeo", "r_hi_photogeo")
@@ -265,7 +265,7 @@ def migrate_bailer_jones_distances(
                     if getattr(l, key) is not None:
                         fields.append(getattr(Source, key))
                         break
-                
+
             n_updated += (
                 Source
                 .bulk_update(
@@ -281,7 +281,7 @@ def migrate_bailer_jones_distances(
 
 
 def migrate_gaia_synthetic_photometry(
-    batch_size=500, 
+    batch_size=500,
     limit=None,
     queue=None
 ):
@@ -297,7 +297,7 @@ def migrate_gaia_synthetic_photometry(
         .select()
         .where((Source.gaia_dr3_source_id.is_null(False) & Source.g_sdss_mag.is_null()))
     )
-        
+
     q = (
         q
         .order_by(Source.gaia_dr3_source_id.asc())
@@ -314,15 +314,15 @@ def migrate_gaia_synthetic_photometry(
                 Gaia_dr3_synthetic_photometry_gspc.source_id,
                 Gaia_dr3_synthetic_photometry_gspc.c_star,
                 Gaia_dr3_synthetic_photometry_gspc.u_jkc_mag,
-                Gaia_dr3_synthetic_photometry_gspc.u_jkc_flag.alias("u_jkc_mag_flag"),                    
+                Gaia_dr3_synthetic_photometry_gspc.u_jkc_flag.alias("u_jkc_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.b_jkc_mag,
-                Gaia_dr3_synthetic_photometry_gspc.b_jkc_flag.alias("b_jkc_mag_flag"),                    
+                Gaia_dr3_synthetic_photometry_gspc.b_jkc_flag.alias("b_jkc_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.v_jkc_mag,
-                Gaia_dr3_synthetic_photometry_gspc.v_jkc_flag.alias("v_jkc_mag_flag"),                                        
+                Gaia_dr3_synthetic_photometry_gspc.v_jkc_flag.alias("v_jkc_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.r_jkc_mag,
-                Gaia_dr3_synthetic_photometry_gspc.r_jkc_flag.alias("r_jkc_mag_flag"),                                        
+                Gaia_dr3_synthetic_photometry_gspc.r_jkc_flag.alias("r_jkc_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.i_jkc_mag,
-                Gaia_dr3_synthetic_photometry_gspc.i_jkc_flag.alias("i_jkc_mag_flag"),                                                        
+                Gaia_dr3_synthetic_photometry_gspc.i_jkc_flag.alias("i_jkc_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.u_sdss_mag,
                 Gaia_dr3_synthetic_photometry_gspc.u_sdss_flag.alias("u_sdss_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.g_sdss_mag,
@@ -334,8 +334,8 @@ def migrate_gaia_synthetic_photometry(
                 Gaia_dr3_synthetic_photometry_gspc.z_sdss_mag,
                 Gaia_dr3_synthetic_photometry_gspc.z_sdss_flag.alias("z_sdss_mag_flag"),
                 Gaia_dr3_synthetic_photometry_gspc.y_ps1_mag,
-                Gaia_dr3_synthetic_photometry_gspc.y_ps1_flag.alias("y_ps1_mag_flag"),                    
-                
+                Gaia_dr3_synthetic_photometry_gspc.y_ps1_flag.alias("y_ps1_mag_flag"),
+
             )
             .where(Gaia_dr3_synthetic_photometry_gspc.source_id.in_([s.gaia_dr3_source_id for s in chunk]))
             .dicts()
@@ -355,11 +355,11 @@ def migrate_gaia_synthetic_photometry(
                         value = 0
 
                 setattr(source, key, value)
-            
+
             update.append(source)
-        
+
         if len(update) > 0:
-            with database.atomic():                    
+            with database.atomic():
                 n_updated += (
                     Source
                     .bulk_update(
@@ -367,15 +367,15 @@ def migrate_gaia_synthetic_photometry(
                         fields=[
                             Source.c_star,
                             Source.u_jkc_mag,
-                            Source.u_jkc_mag_flag,                    
+                            Source.u_jkc_mag_flag,
                             Source.b_jkc_mag,
-                            Source.b_jkc_mag_flag,                    
+                            Source.b_jkc_mag_flag,
                             Source.v_jkc_mag,
-                            Source.v_jkc_mag_flag,                                        
+                            Source.v_jkc_mag_flag,
                             Source.r_jkc_mag,
-                            Source.r_jkc_mag_flag,                                        
+                            Source.r_jkc_mag_flag,
                             Source.i_jkc_mag,
-                            Source.i_jkc_mag_flag,                                                        
+                            Source.i_jkc_mag_flag,
                             Source.u_sdss_mag,
                             Source.u_sdss_mag_flag,
                             Source.g_sdss_mag,
@@ -387,7 +387,7 @@ def migrate_gaia_synthetic_photometry(
                             Source.z_sdss_mag,
                             Source.z_sdss_mag_flag,
                             Source.y_ps1_mag,
-                            Source.y_ps1_mag_flag,   
+                            Source.y_ps1_mag_flag,
                         ]
                     )
                 )
@@ -442,7 +442,7 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
             (Source.zgr_teff.is_null() & Source.gaia_dr3_source_id.is_null(False))
         )
         .limit(limit)
-    )    
+    )
 
     updated = 0
     queue.put(dict(total=limit or q.count()))
@@ -487,8 +487,8 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
 
                 setattr(source, key, transformed_value)
             update.append(source)
-        
-        if update:                    
+
+        if update:
             updated += (
                 Source
                 .bulk_update(
@@ -547,11 +547,11 @@ def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Op
             catalogid_field.asc()
         )
         .limit(limit)
-    )    
+    )
 
     updated = 0
     queue.put(dict(total=q.count()))
-    if q:            
+    if q:
         for batch in chunked(q, batch_size):
             q_tic_v8 = (
                 CatalogToTIC_v8
@@ -566,7 +566,7 @@ def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Op
                 .tuples()
                 .iterator()
             )
-            
+
             sources = { getattr(s, catalogid_field_name): s for s in batch}
             update = []
             for catalogid, tic_v8_id in q_tic_v8:
@@ -574,7 +574,7 @@ def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Op
                 source.tic_v8_id = tic_v8_id
                 update.append(source)
 
-            if update:             
+            if update:
                 updated += (
                     Source
                     .bulk_update(
@@ -586,12 +586,12 @@ def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Op
             queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
-    return updated    
+    return updated
 
 
 def migrate_twomass_photometry(
     limit: Optional[int] = None,
-    batch_size: Optional[int] = 500, 
+    batch_size: Optional[int] = 500,
     queue = None
 ):
     """
@@ -611,7 +611,7 @@ def migrate_twomass_photometry(
         |   Source.h_mag.is_null()
         |   Source.k_mag.is_null()
         )
-        &   Source.catalogid31.is_null(False)                
+        &   Source.catalogid31.is_null(False)
     )
 
     q = (
@@ -624,7 +624,7 @@ def migrate_twomass_photometry(
         )
         .tuples()
         .limit(limit)
-    )    
+    )
 
     queue.put(dict(total=limit or q.count()))
 
@@ -667,7 +667,7 @@ def migrate_twomass_photometry(
             Source.catalogid31.asc()
         )
         .limit(limit)
-    )    
+    )
 
     queue.put(dict(description="Assigning 2MASS photometry", total=limit, completed=0))
 
@@ -686,7 +686,7 @@ def migrate_twomass_photometry(
 
 
     queue.put(dict(description="Updating sources with 2MASS photometry", total=len(updated_sources), completed=0))
-    
+
     updated = 0
     for chunk in chunked(updated_sources, batch_size):
         updated += (
@@ -714,8 +714,8 @@ def migrate_twomass_photometry(
 
 
 def migrate_unwise_photometry(
-    catalogid_field_name="catalogid21", 
-    batch_size: Optional[int] = 500, 
+    catalogid_field_name="catalogid21",
+    batch_size: Optional[int] = 500,
     limit: Optional[int] = None,
     queue = None,
 ):
@@ -749,12 +749,12 @@ def migrate_unwise_photometry(
                 Source.w1_flux.is_null()
             |   Source.w2_flux.is_null()
             )
-            &   Source.catalogid21.is_null(False)            
+            &   Source.catalogid21.is_null(False)
         )
         .order_by(catalogid_field.asc())
         .limit(limit)
-    )    
-    
+    )
+
     updated = 0
     queue.put(dict(total=limit or q.count()))
     if q:
@@ -790,8 +790,8 @@ def migrate_unwise_photometry(
                 for key, value in r.items():
                     setattr(source, key, value)
                 update.append(source)
-            
-            if update:                    
+
+            if update:
                 updated += (
                     Source
                     .bulk_update(
@@ -832,7 +832,7 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
     from astra.migrations.sdss5db.catalogdb import GLIMPSE, CatalogToGLIMPSE
 
     catalogid_field = getattr(Source, catalogid_field_name)
-    
+
     q = (
         Source
         .select(
@@ -878,8 +878,8 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
                 for key, value in r.items():
                     setattr(source, key, value)
                 update.append(source)
-            
-            if update:                    
+
+            if update:
                 updated += (
                     Source
                     .bulk_update(
@@ -916,18 +916,20 @@ def migrate_gaia_source_ids(
         queue = NoQueue()
 
     queue.put(Ellipsis)
-    return None
-    
+
     from astra.migrations.sdss5db.catalogdb import CatalogToGaia_DR3, CatalogToGaia_DR2
 
     q = (
         Source
         .select()
         .where(
-            (Source.gaia_dr3_source_id.is_null())
-        |   (Source.gaia_dr3_source_id == 0)
-        |   (Source.gaia_dr2_source_id.is_null())
-        |   (Source.gaia_dr2_source_id == 0)            
+            (Source.sdss_id == 57960362)
+        & (
+                (Source.gaia_dr3_source_id.is_null())
+            |   (Source.gaia_dr3_source_id <= 0)
+            |   (Source.gaia_dr2_source_id.is_null())
+            |   (Source.gaia_dr2_source_id <= 0)
+        )
         )
         .limit(limit)
     )
@@ -969,11 +971,15 @@ def migrate_gaia_source_ids(
         for catalogid, gaia_dr2_source_id in q:
             source = source_by_catalogid[catalogid]
             source.gaia_dr2_source_id = gaia_dr2_source_id or -1
-            updated.append(source)            
+            updated.append(source)
 
         queue.put(dict(advance=batch_size))
-    
-    fields = list(fields)
+
+    # Confirm that we are either giving something useful, or giving -1
+    for source in updated:
+        source.gaia_dr2_source_id = source.gaia_dr2_source_id or -1
+        source.gaia_dr3_source_id = source.gaia_dr3_source_id or -1
+
     n_updated, updated = (0, list(set(updated)))
     queue.put(dict(total=len(updated), completed=0, description="Ingesting Gaia DR3 source IDs"))
     integrity_errors = []
@@ -991,19 +997,18 @@ def migrate_gaia_source_ids(
             )
         except IntegrityError:
             integrity_errors.append(chunk)
-            raise a
-                
+
         queue.put(dict(advance=batch_size))
     #if integrity_errors:
     #    log.warning(f"Integrity errors encountered for {len(integrity_errors)} chunks")
     queue.put(Ellipsis)
     return n_updated
-        
-        
+
+
 
 
 def migrate_gaia_dr3_astrometry_and_photometry(
-    limit: Optional[int] = None, 
+    limit: Optional[int] = None,
     batch_size: Optional[int] = 500,
     queue=None
 ):
@@ -1014,7 +1019,7 @@ def migrate_gaia_dr3_astrometry_and_photometry(
 
     :param batch_size: [optional]
         The batch size to use for updates.
-    
+
     :param limit: [optional]
         Limit the update to `limit` records. Useful for testing.
     """
@@ -1036,7 +1041,7 @@ def migrate_gaia_dr3_astrometry_and_photometry(
             table_name = "gaia_dr3_source"
             database = SDSS5dbDatabaseConnection(profile="operations")
 
-    
+
     #log.info(f"Updating Gaia astrometry and photometry")
 
     # Retrieve sources which have gaia identifiers but not astrometry
@@ -1053,13 +1058,13 @@ def migrate_gaia_dr3_astrometry_and_photometry(
             &   (
                 Source.gaia_dr3_source_id.is_null(False)
             &   (Source.gaia_dr3_source_id > 0)
-            )            
+            )
         )
         .order_by(
             Source.gaia_dr3_source_id.asc()
         )
     )
-    
+
     q = (
         q
         .limit(limit)
@@ -1114,7 +1119,7 @@ def migrate_gaia_dr3_astrometry_and_photometry(
                 Source.gaia_dr3_source_id.is_null(False)
             &   (Source.gaia_dr3_source_id > 0)
             )
-        )        
+        )
     )
 
     updated_sources = []
@@ -1147,12 +1152,10 @@ def migrate_gaia_dr3_astrometry_and_photometry(
                     Source.e_pmde,
                     Source.gaia_v_rad,
                     Source.gaia_e_v_rad
-                ]        
+                ]
             )
         )
 
     #log.info(f"Updated {updated} records ({len(gaia_data)} gaia sources)")
     queue.put(Ellipsis)
     return updated
-
-

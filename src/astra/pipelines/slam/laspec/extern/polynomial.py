@@ -25,7 +25,7 @@ from functools import reduce
 import numpy as np
 from matplotlib import pyplot as plt  # modified by Bo Zhang
 from numpy import (newaxis, arange, pi)
-from numpy.lib.polynomial import *  # @UnusedWildImport
+#from numpy.lib.polynomial import *  # @UnusedWildImport
 from numpy.polynomial import polyutils as pu
 from scipy.fftpack import dct, idct as _idct
 from scipy.interpolate import pade

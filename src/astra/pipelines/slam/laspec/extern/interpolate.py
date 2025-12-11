@@ -10,7 +10,8 @@ from numpy import ones, zeros, prod, sin, diff, pi, inf, vstack, linspace
 from scipy.interpolate import BPoly, interp1d
 
 # from wafo import polynomial as pl
-from . import polynomial as pl
+#from . import polynomial as pl
+from numpy.polynomial import polynomial as pl
 
 __all__ = [
     'PPform', 'savitzky_golay', 'savitzky_golay_piecewise', 'sgolay2d',

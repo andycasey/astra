@@ -1224,11 +1224,13 @@ def apply_dr19_solar_neighbourhood_abundance_corrections():
 
     giant_kwds = {}
     for field_name, offset in d["giants"].items():
-        giant_kwds[field_name[4:]] = getattr(ASPCAP, field_name) - offset[field_name]
+        if hasattr(ASPCAP, field_name):
+            giant_kwds[field_name[4:]] = getattr(ASPCAP, field_name) - offset
 
     dwarf_kwds = {}
     for field_name, offset in d["dwarfs"].items():
-        dwarf_kwds[field_name[4:]] = getattr(ASPCAP, field_name) - offset[field_name]
+        if hasattr(ASPCAP, field_name):
+            dwarf_kwds[field_name[4:]] = getattr(ASPCAP, field_name) - offset
 
     (
         ASPCAP

@@ -131,7 +131,7 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
             )
             xcsao_params[f"xcsao_{key}"] = y
             xcsao_params[f"xcsao_e_{key}"] = e_y
-        xcsao_params["xcsao_mean_rxc"] = np.mean([v["xcsao_rxc"] for u, v in zip(in_stack, visits) if u])
+        xcsao_params["xcsao_meanrxc"] = np.mean([v["xcsao_rxc"] for u, v in zip(in_stack, visits) if u])
 
         # Run NMF on the coadd spectrum.
         (coadd_continuum, ), meta = boss_continuum_model.fit(coadd_flux, coadd_ivar, full_output=True)

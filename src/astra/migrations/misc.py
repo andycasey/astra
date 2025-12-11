@@ -23,7 +23,7 @@ von = lambda v: v or np.nan
 def update_sdss_id_related_fields():
 
     from astra.models.source import Source
-    from astra.migrations.sdss5db.catalogdb import CatalogdbModel
+    from astra.migrations.sdss5db.catalogdb import CatalogdbModel, Catalog
 
     class SDSS_ID_Flat(CatalogdbModel):
         class Meta:
@@ -32,6 +32,52 @@ def update_sdss_id_related_fields():
     class SDSS_ID_Stacked(CatalogdbModel):
         class Meta:
             table_name = "sdss_id_stacked"
+
+    # Check for missing sdss_ids first
+    subq = (
+        Source
+        .select(Source.pk)
+        .where(
+            Source.sdss_id.is_null()
+        &   (
+                Source.catalogid21.is_null(False)
+            |   Source.catalogid25.is_null(False)
+            |   Source.catalogid31.is_null(False)
+            |   Source.catalogid.is_null(False)
+            )
+        )
+    )
+    n_updated_sdss_id = (
+        Source
+        .update(sdss_id=SDSS_ID_Flat.sdss_id)
+        .from_(SDSS_ID_Flat)
+        .where(
+            (
+                (SDSS_ID_Flat.catalogid == Source.catalogid)
+            |   (SDSS_ID_Flat.catalogid == Source.catalogid21)
+            |   (SDSS_ID_Flat.catalogid == Source.catalogid25)
+            |   (SDSS_ID_Flat.catalogid == Source.catalogid31)
+            )
+            & (SDSS_ID_Flat.rank == 1)
+            & (Source.pk.in_(subq))
+        )
+        .execute()
+    )
+
+    latest_flat = (
+        SDSS_ID_Flat
+        .select(
+            SDSS_ID_Flat.sdss_id,
+            SDSS_ID_Flat.version_id,
+            SDSS_ID_Flat.n_associated,
+            SDSS_ID_Flat.catalogid,
+        )
+        .where(SDSS_ID_Flat.rank == 1)
+        .distinct(SDSS_ID_Flat.sdss_id)
+        .order_by(SDSS_ID_Flat.sdss_id, SDSS_ID_Flat.version_id.desc())
+        .alias('latest_flat')
+    )
+
 
     # Subquery to get the sources we want to update
     subq = (
@@ -49,20 +95,21 @@ def update_sdss_id_related_fields():
         )
     )
 
-    n_updated = (
+    n_updated_misc = (
         Source
         .update(
-            version_id=SDSS_ID_Flat.version_id,
-            n_associated=SDSS_ID_Flat.n_associated,
+            catalogid=latest_flat.c.catalogid,
+            version_id=latest_flat.c.version_id,
+            n_associated=latest_flat.c.n_associated,
             catalogid21=SDSS_ID_Stacked.catalogid21,
             catalogid25=SDSS_ID_Stacked.catalogid25,
             catalogid31=SDSS_ID_Stacked.catalogid31,
         )
-        .from_(SDSS_ID_Flat, SDSS_ID_Stacked)
+        .from_(latest_flat, SDSS_ID_Stacked)
         .where(
-            (Source.sdss_id == SDSS_ID_Flat.sdss_id)
+            (Source.sdss_id == latest_flat.c.sdss_id)
             & (Source.sdss_id == SDSS_ID_Stacked.sdss_id)
-            & (Source.sdss_id.in_(subq))
+            & Source.sdss_id.in_(subq)
         )
         .execute()
     )
@@ -70,7 +117,13 @@ def update_sdss_id_related_fields():
     # Update things that have no catalogid to use most recent thing.
     n_update_catalogids = (
         Source
-        .update(catalogid=Source.catalogid31)
+        .update(
+            catalogid=fn.COALESCE(
+                Source.catalogid31,
+                Source.catalogid25,
+                Source.catalogid21
+            )
+        )
         .where(
             Source.catalogid.is_null()
         &   Source.sdss_id.is_null(False)
@@ -79,7 +132,20 @@ def update_sdss_id_related_fields():
         .execute()
     )
 
-    return max(n_updated, n_update_catalogids)
+    # Update catalog lead names.
+    n_updated_leads = (
+        Source
+        .update(lead=Catalog.lead)
+        .from_(Catalog)
+        .where(
+            (Catalog.catalogid == Source.catalogid)
+        &   (Catalog.version_id == Source.version_id)
+        )
+        .execute()
+    )
+
+
+    return (n_updated_sdss_id, n_update_catalogids, n_updated_misc, n_updated_leads)
 
 
 def compute_w1mag_and_w2mag(

@@ -18,21 +18,28 @@ from peewee import (
 )
 
 def match_unlinked_boss_visit_spectra():
-    return (
-        BossVisitSpectrum
-        .update(source_pk=Source.pk)
-        .from_(Source)
-        .where(
-            BossVisitSpectrum.source.is_null()
-            & (
-                (BossVisitSpectrum.catalogid == Source.catalogid)
-                | (BossVisitSpectrum.catalogid == Source.catalogid21)
-                | (BossVisitSpectrum.catalogid == Source.catalogid25)
-                | (BossVisitSpectrum.catalogid == Source.catalogid31)
-            )
-        )
-        .execute()
+    from astra.models.boss import BossVisitSpectrum
+    from astra.models.source import Source
+
+    catalogids = (
+        Source.catalogid,
+        Source.catalogid31,
+        Source.catalogid25,
+        Source.catalogid21
     )
+    n = 0
+    for catalogid in catalogids:
+        n += (
+            BossVisitSpectrum
+            .update(source_pk=Source.pk)
+            .from_(Source)
+            .where(
+                BossVisitSpectrum.source.is_null()
+                & (BossVisitSpectrum.catalogid == catalogid)
+            )
+            .execute()
+        )
+    return n
 
 
 def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000, incremental=True):

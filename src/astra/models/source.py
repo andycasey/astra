@@ -27,24 +27,24 @@ class Source(BaseModel):
 
     pk = AutoField(primary_key=True)
 
-    #> Identifiers    
+    #> Identifiers
     sdss_id = BigIntegerField(index=True, unique=True, null=True)
     sdss4_apogee_id = TextField(index=True, unique=True, null=True)
     gaia_dr2_source_id = BigIntegerField(null=True, unique=True)
     gaia_dr3_source_id = BigIntegerField(null=True, unique=True)
     tic_v8_id = BigIntegerField(null=True)
     healpix = IntegerField(null=True)
-    
-    #> Targeting Provenance 
+
+    #> Targeting Provenance
     lead = TextField(null=True)
     version_id = IntegerField(null=True)
-    catalogid = BigIntegerField(null=True)
-    catalogid21 = BigIntegerField(null=True)
-    catalogid25 = BigIntegerField(null=True)
-    catalogid31 = BigIntegerField(null=True)
+    catalogid = BigIntegerField(index=True, null=True)
+    catalogid21 = BigIntegerField(index=True, null=True)
+    catalogid25 = BigIntegerField(index=True, null=True)
+    catalogid31 = BigIntegerField(index=True, null=True)
     n_associated = IntegerField(null=True)
     n_neighborhood = IntegerField(default=-1)
-    
+
     # Only do sdss5_target_flags if we are using a PostgreSQL database, as SQLite does not support it.
     if isinstance(database, PostgresqlDatabase):
         sdss5_target_flags = BigBitField(null=True)
@@ -57,7 +57,7 @@ class Source(BaseModel):
     sdss4_apogee2_target3_flags = BitField(default=0)
     sdss4_apogee_member_flags = BitField(default=0)
     sdss4_apogee_extra_target_flags = BitField(default=0)
-    
+
     # sdss4_apogee_target1_flags
     flag_sdss4_apogee_faint = sdss4_apogee_target1_flags.flag(2**0)
     flag_sdss4_apogee_medium = sdss4_apogee_target1_flags.flag(2**1)
@@ -302,20 +302,20 @@ class Source(BaseModel):
 
     # A decision was made here.
     # It would be nice to keep the original field names from each photometric survey so that
-    # users know exactly which column means what. In other words, "do we be internally 
+    # users know exactly which column means what. In other words, "do we be internally
     # consistent with naming things, or be consistent with the original names?".
-    
-    # Unfortunately, some of the original field names are longer than 8 characters, so we 
+
+    # Unfortunately, some of the original field names are longer than 8 characters, so we
     # would end up with many HIERARCH cards if we kept the original names. There might be
     # some other downsides if we wrote code that relied on some of those naming conventions.
     # For example, if bitfields always have the suffix `_flags` and then we wanted to create
     # documentation for any flag set (based on the `_flags` suffix instead of BitField type)
-    # then some flagging things would not be documented. 
+    # then some flagging things would not be documented.
 
     # Neither avenue is clearly better, so we make a decision, document it, and live with it.
-    # For Gaia, we use `_mag`. For 2MASS we use `_mag`. 
-    
-    # For unWISE they report fluxes, so we keep their naming convention where it fits within 
+    # For Gaia, we use `_mag`. For 2MASS we use `_mag`.
+
+    # For unWISE they report fluxes, so we keep their naming convention where it fits within
     # 8 characters, and document when the name differs from the original catalog.
 
     #> Gaia Photometry
@@ -333,7 +333,7 @@ class Source(BaseModel):
     ph_qual = TextField(null=True)
     bl_flg = TextField(null=True)
     cc_flg = TextField(null=True)
-    #< See https://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec2_2a.html 
+    #< See https://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec2_2a.html
 
     #> unWISE Photometry
     w1_mag = FloatField(null=True)
@@ -351,7 +351,7 @@ class Source(BaseModel):
     w1aflags = BitField(default=0, null=True)
     w2aflags = BitField(default=0, null=True)
     #< See https://catalog.unwise.me/catalogs.html
-    
+
     flag_unwise_w1_in_core_or_wings = w1uflags.flag(2**0)
     flag_unwise_w1_in_diffraction_spike = w1uflags.flag(2**1)
     flag_unwise_w1_in_ghost = w1uflags.flag(2**2)
@@ -360,7 +360,7 @@ class Source(BaseModel):
     flag_unwise_w1_in_circular_halo = w1uflags.flag(2**5)
     flag_unwise_w1_saturated = w1uflags.flag(2**6)
     flag_unwise_w1_in_geometric_diffraction_spike = w1uflags.flag(2**7)
-    
+
     flag_unwise_w2_in_core_or_wings = w2uflags.flag(2**0)
     flag_unwise_w2_in_diffraction_spike = w2uflags.flag(2**1)
     flag_unwise_w2_in_ghost = w2uflags.flag(2**2)
@@ -369,7 +369,7 @@ class Source(BaseModel):
     flag_unwise_w2_in_circular_halo = w2uflags.flag(2**5)
     flag_unwise_w2_saturated = w2uflags.flag(2**6)
     flag_unwise_w2_in_geometric_diffraction_spike = w2uflags.flag(2**7)
-        
+
     flag_unwise_w1_in_bright_star_psf = w1aflags.flag(2**0)
     flag_unwise_w1_in_hyperleda_galaxy = w1aflags.flag(2**1)
     flag_unwise_w1_in_big_object = w1aflags.flag(2**2)
@@ -425,7 +425,7 @@ class Source(BaseModel):
     flag_glimpse_4_sources_within_1_and_1p5_arcsecond = csf.flag(2**4)
     flag_glimpse_5_sources_within_0p5_and_1_arcsecond = csf.flag(2**5)
     flag_glimpse_6_sources_within_0p5_arcsecond = csf.flag(2**6)
-    
+
     #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
     zgr_teff = FloatField(null=True)
     zgr_e_teff = FloatField(null=True)
@@ -479,7 +479,7 @@ class Source(BaseModel):
     e_ebv_bayestar_2019 = FloatField(null=True)
     ebv_edenhofer_2023 = FloatField(null=True)
     e_ebv_edenhofer_2023 = FloatField(null=True)
-    
+
     #> Synthetic Photometry from Gaia XP Spectra
     c_star = FloatField(null=True)
     u_jkc_mag = FloatField(null=True)
@@ -504,7 +504,7 @@ class Source(BaseModel):
     z_sdss_mag_flag = IntegerField(null=True)
     y_ps1_mag = FloatField(null=True)
     y_ps1_mag_flag = IntegerField(null=True)
-    
+
     #> Observations Summary
     n_boss_visits = IntegerField(null=True)
     boss_min_mjd = IntegerField(null=True)
@@ -515,7 +515,7 @@ class Source(BaseModel):
 
     created = DateTimeField(default=datetime.datetime.now)
     modified = DateTimeField(default=datetime.datetime.now)
-    
+
 
     @property
     def sdss5_cartons(self):
@@ -544,7 +544,7 @@ class Source(BaseModel):
 
         :param name:
             The name of the attribute to check.
-        
+
         :param value:
             The value of the attribute to check.
         """
@@ -591,7 +591,7 @@ class Source(BaseModel):
             The mapper name.
         """
         return self.assigned_to_carton_attribute("mapper", mapper)
-    
+
     @hybrid_method
     def assigned_to_carton_with_alt_program(self, alt_program):
         """
@@ -600,14 +600,14 @@ class Source(BaseModel):
         :param alt_program:
             The alternate program name.
         """
-    
+
         return self.assigned_to_carton_attribute("alt_program", alt_program)
 
     @hybrid_method
     def assigned_to_carton_with_alt_name(self, alt_name):
         """
         An expression to evaluate whether this source is assigned to any carton with the given alternate name.
-        
+
         :param alt_name:
             The alternate name.
         """
@@ -617,18 +617,18 @@ class Source(BaseModel):
     def assigned_to_carton_with_name(self, name):
         """
         An expression to evaluate whether this source is assigned to any carton with the given name.
-        
+
         :param name:
             The carton name.
         """
         return self.assigned_to_carton_attribute("name", name)
-    
+
 
     @hybrid_method
     def is_sdss5_target_bit_set(self, bit):
         """
         An expression to evaluate whether this source is assigned to the carton with the given bit position.
-        
+
         :param bit:
             The carton bit position.
         """
@@ -636,12 +636,12 @@ class Source(BaseModel):
             (fn.length(self.sdss5_target_flags) > int(bit / 8))
         &   (fn.get_bit(self.sdss5_target_flags, int(bit)) > 0)
         )
-    
+
     @hybrid_method
     def is_any_sdss5_target_bit_set(self, *bits):
         """
         An expression to evaluate whether this source is assigned to any carton with the given bit positions.
-        
+
         :param bits:
             The carton bit positions.
         """
@@ -650,7 +650,7 @@ class Source(BaseModel):
             for bit in bits[1:]:
                 expression = expression | self.is_sdss5_target_bit_set(bit)
         return expression
-    
+
 
     @property
     def spectra(self):
@@ -666,4 +666,3 @@ def get_carton_to_bit_mapping():
     t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_3_with_groups.csv"))
     t.sort("bit")
     return t
-

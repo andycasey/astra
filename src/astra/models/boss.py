@@ -5,7 +5,7 @@ from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.fields import (
-    ArrayField, AutoField, FloatField, BooleanField, DateTimeField, BigIntegerField, IntegerField, TextField,    
+    ArrayField, AutoField, FloatField, BooleanField, DateTimeField, BigIntegerField, IntegerField, TextField,
     ForeignKeyField, PixelArray, BitField, PickledPixelArrayAccessor, LogLambdaArrayAccessor
 )
 
@@ -31,15 +31,15 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         index=True,
         column_name="source_pk",
         backref="boss_visit_spectra"
-    )    
+    )
 
     created = DateTimeField(default=datetime.datetime.now)
     modified = DateTimeField(default=datetime.datetime.now)
 
     #> Spectral data
     wavelength = PixelArray(
-        ext=1, 
-        column_name="loglam", 
+        ext=1,
+        column_name="loglam",
         transform=lambda v, *a: 10**v,
     )
     flux = PixelArray(ext=1)
@@ -58,7 +58,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     run2d = TextField()
     mjd = IntegerField()
     fieldid = IntegerField()
-    catalogid = BigIntegerField()
+    catalogid = BigIntegerField(index=True)
     healpix = IntegerField()
     spec_file = TextField(help_text="BOSS specFull basename")
 
@@ -117,7 +117,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     snr = FloatField(null=True)
     gri_gaia_transform_flags = BitField(default=0)
     zwarning_flags = BitField(default=0)
-    
+
     #> XCSAO
     xcsao_v_rad = FloatField(null=True)
     xcsao_e_v_rad = FloatField(null=True)
@@ -175,15 +175,15 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     def path(self):
         if self.run2d == "v6_2_1":
             basename = (
-                    self.spec_file 
-                or  f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"                    
+                    self.spec_file
+                or  f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
             )
             return (
                 f"$SAS_BASE_DIR/"
                 f"ipl-4/"
                 f"spectro/boss/redux/"
                 f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
-                f"{basename}"                
+                f"{basename}"
             )
 
         elif self.run2d.startswith("v6_2"):
@@ -192,7 +192,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
                 f"sdsswork/bhm/boss/spectro/redux/"
                 f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
                 f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
-            )        
+            )
         else:
             return (
                 f"$SAS_BASE_DIR/"
@@ -212,7 +212,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         if self.run2d in ['v6_0_1','v6_0_2', 'v6_0_3', 'v6_0_4']:
             return str(self.fieldid)
         return str(self.fieldid).zfill(6)
-    
+
     @property
     def isplate(self):
         if not self.run2d:

@@ -1,13 +1,126 @@
 #!/usr/bin/env python3
 import typer
 import os
+from pathlib import Path
 from typing import List, Optional, Tuple
 from typing_extensions import Annotated
 from enum import Enum
 
 app = typer.Typer()
+config_app = typer.Typer(help="Manage Astra configuration.")
+app.add_typer(config_app, name="config")
 
 in_airflow_context = os.environ.get("AIRFLOW_CTX_TASK_ID", None) is not None
+
+# User config file path
+USER_CONFIG_DIR = Path.home() / ".config" / "sdss" / "astra"
+USER_CONFIG_FILE = USER_CONFIG_DIR / "astra.yml"
+
+
+def _get_nested_value(d: dict, key: str):
+    """Get a value from a nested dict using dot notation (e.g., 'database.host')."""
+    keys = key.split(".")
+    value = d
+    for k in keys:
+        if isinstance(value, dict) and k in value:
+            value = value[k]
+        else:
+            return None
+    return value
+
+
+def _set_nested_value(d: dict, key: str, value):
+    """Set a value in a nested dict using dot notation (e.g., 'database.host')."""
+    keys = key.split(".")
+    for k in keys[:-1]:
+        d = d.setdefault(k, {})
+    d[keys[-1]] = value
+
+
+def _format_config(d: dict, indent: int = 0) -> str:
+    """Format a config dict for display."""
+    lines = []
+    prefix = "  " * indent
+    for key, value in d.items():
+        if isinstance(value, dict):
+            lines.append(f"{prefix}{key}:")
+            lines.append(_format_config(value, indent + 1))
+        else:
+            lines.append(f"{prefix}{key}: {value}")
+    return "\n".join(lines)
+
+
+def _load_user_config() -> dict:
+    """Load the user config file if it exists."""
+    if USER_CONFIG_FILE.exists():
+        import yaml
+        with open(USER_CONFIG_FILE, "r") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def _save_user_config(config: dict) -> None:
+    """Save config to the user config file."""
+    import yaml
+    USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(USER_CONFIG_FILE, "w") as f:
+        yaml.safe_dump(config, f, default_flow_style=False)
+
+
+@config_app.command("show")
+def config_show():
+    """Show all configuration settings."""
+    from astra import config
+    typer.echo(_format_config(dict(config)))
+
+
+@config_app.command("get")
+def config_get(
+    key: Annotated[str, typer.Argument(help="The configuration key (use dot notation for nested keys, e.g., 'database.host').")]
+):
+    """Get a configuration value."""
+    from astra import config
+    value = _get_nested_value(dict(config), key)
+    if value is None:
+        typer.echo(f"Key '{key}' not found.", err=True)
+        raise typer.Exit(1)
+    if isinstance(value, dict):
+        typer.echo(_format_config(value))
+    else:
+        typer.echo(value)
+
+
+@config_app.command("set")
+def config_set(
+    key: Annotated[str, typer.Argument(help="The configuration key (use dot notation for nested keys, e.g., 'database.host').")],
+    value: Annotated[str, typer.Argument(help="The value to set.")]
+):
+    """Set a configuration value in the user config file."""
+    import yaml
+
+    # Try to parse value as YAML to handle booleans, numbers, etc.
+    try:
+        parsed_value = yaml.safe_load(value)
+    except yaml.YAMLError:
+        parsed_value = value
+
+    user_config = _load_user_config()
+    _set_nested_value(user_config, key, parsed_value)
+    _save_user_config(user_config)
+
+    typer.echo(f"Set {key} = {parsed_value}")
+    typer.echo(f"Saved to {USER_CONFIG_FILE}")
+
+
+@config_app.command("path")
+def config_path():
+    """Show the path to the user configuration file."""
+    typer.echo(f"User config file: {USER_CONFIG_FILE}")
+    if USER_CONFIG_FILE.exists():
+        typer.echo("(exists)")
+    else:
+        typer.echo("(does not exist yet)")
+
 
 class Product(str, Enum):
     mwmTargets = "mwmTargets"
@@ -421,9 +534,6 @@ def run(
     from astra import models, __version__, generate_queries_for_task
     from astra.utils import log, resolve_task, accepts_live_renderable
 
-
-
-
     fun = resolve_task(task)
     fun_accepts_live_renderable = accepts_live_renderable(fun)
     live_renderable = Table.grid()
@@ -441,21 +551,28 @@ def run(
         )
         live_renderable.add_row(Panel(overall_progress, title=task))
 
+    iterable = generate_queries_for_task(
+        fun,
+        spectrum_model,
+        sdss_ids=sdss_ids,
+        limit=limit,
+        page=page
+    )
+    from time import sleep
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
-        #log.handlers.clear()
-        #log.handlers.extend([
-        #    RichHandler(console=live.console, markup=True, rich_tracebacks=True),
-        #])
-
-        for model, q in generate_queries_for_task(fun, spectrum_model, sdss_ids=sdss_ids, limit=limit, page=page):
+        for model, q in iterable:
             if total := q.count():
+                worker = fun(q, live=True, live_renderable=(live_renderable_path or live_renderable))
+
                 if use_local_renderable:
-                    task = overall_progress.add_task(model.__name__, total=total)
-                for r in fun(q, live=True, live_renderable=(live_renderable_path or live_renderable)):
-                    if use_local_renderable:
-                        overall_progress.update(task, advance=1)
-                if use_local_renderable:
-                    overall_progress.update(task, completed=True)
+                    task_id = overall_progress.add_task(model.__name__)
+                    overall_progress.update(task_id, total=total)
+                    for r in worker:
+                        overall_progress.update(task_id, advance=1, refresh=True)
+                    #overall_progress.update(task_id, refresh=True, completed=True)
+                else:
+                    for r in worker:
+                        pass
 
     """
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as p:
@@ -487,18 +604,6 @@ def run(
     """
 
 
-def wrapper(target, *args, **kwargs):
-    try:
-        r = target(*args, **kwargs)
-    except Exception as e:
-        q = kwargs.get("queue", None)
-        e.add_note(f"\n\nRaised in {target.__name__}()")
-        if q is not None:
-            q.put(e)
-    else:
-        q = kwargs.get("queue", None)
-        if q is not None:
-            q.put(Ellipsis)
 
 
 @app.command()
@@ -509,50 +614,41 @@ def migrate(
     max_mjd: Optional[int] = typer.Option(None, help="Maximum MJD of spectra to migrate."),
     metadata: Optional[bool] = typer.Option(True, help="Migrate metadata (e.g., photometry, astrometry)."),
     incremental: Optional[bool] = typer.Option(True, help="Only attempt to migrate new spectra."),
-    extinction: Optional[bool] = typer.Option(False, help="Compute extinction."),
+    extinction: Optional[bool] = typer.Option(True, help="Compute extinction."),
 ):
-    """Migrate spectra and auxillary information to the Astra database."""
+    """Migrate spectra and auxiliary information to the Astra database."""
 
-    import os
+    import sys
     import multiprocessing as mp
-    from signal import SIGKILL
+    from typing import Dict
 
-    # Set multiprocessing start method to avoid logger inheritance
+    # Set multiprocessing start method
     try:
         mp.set_start_method('fork', force=True)
     except RuntimeError:
-        # If 'fork' is not available (like on Windows), fall back to default
         try:
             mp.set_start_method('spawn', force=True)
         except RuntimeError:
-            pass  # Already set
+            pass
 
     from rich.console import Console
-    from rich.progress import Text, Progress, SpinnerColumn, Text, TextColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn, BarColumn, MofNCompleteColumn as _MofNCompleteColumn
-    from rich.logging import RichHandler
+    from rich.progress import (
+        Progress, SpinnerColumn, TextColumn, BarColumn,
+        TimeElapsedColumn, TimeRemainingColumn,
+        MofNCompleteColumn as _MofNCompleteColumn, Text
+    )
     from rich.live import Live
     from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text as RichText
-    from collections import deque
+    from astra.utils import log
 
-    class MofNCompleteColumn(_MofNCompleteColumn):
-        def render(self, task):
-            completed = int(task.completed)
-            total = f"{int(task.total):,}" if task.total is not None else "?"
-            total_width = len(str(total))
-            return Text(
-                f"{completed:{total_width},d}{self.separator}{total}",
-                style="progress.download",
-            )
-
+    # Import all migration functions
     from astra.migrations.boss import (
         migrate_from_spall_file,
         migrate_specfull_metadata_from_image_headers
     )
-    #from astra.migrations.apogee import migrate_apvisit_metadata_from_image_headers
-    from astra.migrations.new_apogee import (
+    from astra.migrations.apogee import (
         migrate_apogee_spectra_from_sdss5_apogee_drpdb,
+        migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb,
         migrate_dithered_metadata,
         migrate_apogee_visits_in_apStar_files
     )
@@ -566,7 +662,8 @@ def migrate(
         migrate_gaia_dr3_astrometry_and_photometry,
         migrate_zhang_stellar_parameters,
         migrate_bailer_jones_distances,
-        migrate_gaia_synthetic_photometry
+        migrate_gaia_synthetic_photometry,
+        migrate_sdss4_apogee_id
     )
     from astra.migrations.misc import (
         compute_f_night_time_for_boss_visits,
@@ -575,21 +672,303 @@ def migrate(
         compute_n_neighborhood,
         update_galactic_coordinates,
         compute_w1mag_and_w2mag,
-        fix_unsigned_apogee_flags
+        fix_unsigned_apogee_flags,
+        update_sdss_id_related_fields
     )
-    from astra.migrations.reddening import update_reddening
-    from astra.migrations.targeting import (
-        migrate_carton_assignments_to_bigbitfield,
-        migrate_targeting_cartons
+    from astra.migrations.reddening import update_reddening, preload_dust_maps
+    from astra.migrations.targeting import migrate_targeting_cartons
+    from astra.migrations.source import create_sources_and_link_spectra
+    from astra.migrations.scheduler import MigrationTask, MigrationScheduler, get_satisfiable_tasks
+
+    class MofNCompleteColumn(_MofNCompleteColumn):
+        def render(self, task):
+            completed = int(task.completed)
+            # Handle None or 0 total gracefully
+            if task.total is None or task.total == 0:
+                total = "?"
+            else:
+                total = f"{int(task.total):,}"
+            total_width = len(str(total))
+            return Text(
+                f"{completed:{total_width},d}{self.separator}{total}",
+                style="progress.download",
+            )
+
+    # Build the task graph
+    tasks: Dict[str, MigrationTask] = {}
+
+    # ==========================================================================
+    # Phase 1: Spectrum ingestion (spectrum-level data only, no source creation)
+    # ==========================================================================
+    if apred is not None:
+        if apred == "dr17":
+            tasks["apogee_spectra"] = MigrationTask(
+                name="apogee_spectra",
+                func=migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb,
+                kwargs={"limit": limit},
+                description="Ingesting APOGEE dr17 spectra",
+                writes_to={"apogee_visit_spectrum"}
+            )
+        else:
+            tasks["apogee_spectra"] = MigrationTask(
+                name="apogee_spectra",
+                func=migrate_apogee_spectra_from_sdss5_apogee_drpdb,
+                args=(apred,),
+                kwargs={"limit": limit, "incremental": incremental},
+                description=f"Ingesting APOGEE {apred} spectra",
+                writes_to={"apogee_visit_spectrum"}
+            )
+            tasks["apstar_visits"] = MigrationTask(
+                name="apstar_visits",
+                func=migrate_apogee_visits_in_apStar_files,
+                args=(apred, ),
+                description="Ingesting ApogeeVisitSpectrumInApStar entries",
+                depends_on={"apogee_spectra"},
+                writes_to={"apogee_visit_spectrum_in_apstar"}
+            )
+
+    if run2d is not None:
+        tasks["boss_spectra"] = MigrationTask(
+            name="boss_spectra",
+            func=migrate_from_spall_file,
+            args=(run2d,),
+            kwargs={"limit": limit, "incremental": incremental},
+            description=f"Ingesting BOSS {run2d} spectra",
+            writes_to={"boss_visit_spectrum"}
+        )
+
+    # ==========================================================================
+    # Phase 2: Source creation and linking (after spectra are ingested)
+    # ==========================================================================
+    spectra_deps = {"apogee_spectra", "boss_spectra"} & tasks.keys()
+
+    tasks["create_sources"] = MigrationTask(
+        name="create_sources",
+        func=create_sources_and_link_spectra,
+        description="Creating sources and linking spectra",
+        depends_on=spectra_deps,
+        writes_to={"source", "boss_visit_spectrum", "apogee_visit_spectrum"}
     )
-    from astra.utils import log, silenced
-    import sys
-    if in_airflow_context:
-        console = Console(file=sys.stdout)
-    else:
-        console = Console()
 
+    # ==========================================================================
+    # Phase 3: Metadata (depends on sources being created)
+    # ==========================================================================
+    if metadata:
+        apogee_deps = {"apogee_spectra"} & tasks.keys()
+        boss_deps = {"boss_spectra"} & tasks.keys()
+        source_deps = {"create_sources"} & tasks.keys()
 
+        # --- Source table updates (run sequentially to avoid write conflicts) ---
+
+        # Update sdss_id-related fields first (needed for downstream operations)
+        tasks["sdss_id_fields"] = MigrationTask(
+            name="sdss_id_fields",
+            func=update_sdss_id_related_fields,
+            description="Updating sdss_id related fields",
+            depends_on=source_deps or spectra_deps,
+            writes_to={"source"}
+        )
+
+        # Gaia chain: must run sequentially, each depends on previous
+        tasks["gaia_source_ids"] = MigrationTask(
+            name="gaia_source_ids",
+            func=migrate_gaia_source_ids,
+            description="Ingesting Gaia DR3 source IDs",
+            depends_on={"sdss_id_fields"} if "sdss_id_fields" in tasks else (source_deps or spectra_deps),
+            writes_to={"source"}
+        )
+        tasks["sdss4_apogee_id"] = MigrationTask(
+            name="sdss4_apogee_id",
+            func=migrate_sdss4_apogee_id,
+            description="Ingesting SDSS4 APOGEE IDs",
+            depends_on={"gaia_source_ids"},
+            writes_to={"source"}
+        )
+        tasks["gaia_astrometry"] = MigrationTask(
+            name="gaia_astrometry",
+            func=migrate_gaia_dr3_astrometry_and_photometry,
+            description="Ingesting Gaia DR3 astrometry and photometry",
+            depends_on={"sdss4_apogee_id"},
+            writes_to={"source"}
+        )
+        tasks["zhang_params"] = MigrationTask(
+            name="zhang_params",
+            func=migrate_zhang_stellar_parameters,
+            description="Ingesting Zhang stellar parameters",
+            depends_on={"gaia_astrometry"},
+            writes_to={"source"}
+        )
+        tasks["bailer_jones"] = MigrationTask(
+            name="bailer_jones",
+            func=migrate_bailer_jones_distances,
+            description="Ingesting Bailer-Jones distances",
+            depends_on={"zhang_params"},
+            writes_to={"source"}
+        )
+        tasks["gaia_synth_phot"] = MigrationTask(
+            name="gaia_synth_phot",
+            func=migrate_gaia_synthetic_photometry,
+            description="Ingesting Gaia synthetic photometry",
+            depends_on={"bailer_jones"},
+            writes_to={"source"}
+        )
+        """
+        tasks["n_neighborhood"] = MigrationTask(
+            name="n_neighborhood",
+            func=compute_n_neighborhood,
+            description="Computing n_neighborhood",
+            depends_on={"gaia_synth_phot"},
+            writes_to={"source"}
+        )
+        """
+
+        # Photometry tasks: can run after Gaia chain to avoid source conflicts
+        tasks["twomass"] = MigrationTask(
+            name="twomass",
+            func=migrate_twomass_photometry,
+            description="Ingesting 2MASS photometry",
+            depends_on={"gaia_synth_phot"},
+            writes_to={"source"}
+        )
+        tasks["unwise"] = MigrationTask(
+            name="unwise",
+            func=migrate_unwise_photometry,
+            description="Ingesting unWISE photometry",
+            depends_on={"twomass"},
+            writes_to={"source"}
+        )
+        tasks["glimpse"] = MigrationTask(
+            name="glimpse",
+            func=migrate_glimpse_photometry,
+            description="Ingesting GLIMPSE photometry",
+            depends_on={"unwise"},
+            writes_to={"source"}
+        )
+
+        # Other source updates: chain after photometry
+        tasks["healpix"] = MigrationTask(
+            name="healpix",
+            func=migrate_healpix,
+            description="Ingesting HEALPix values",
+            depends_on={"glimpse"},
+            writes_to={"source"}
+        )
+        tasks["tic_v8"] = MigrationTask(
+            name="tic_v8",
+            func=migrate_tic_v8_identifier,
+            description="Ingesting TIC v8 identifiers",
+            depends_on={"healpix"},
+            writes_to={"source"}
+        )
+        tasks["galactic_coords"] = MigrationTask(
+            name="galactic_coords",
+            func=update_galactic_coordinates,
+            description="Computing Galactic coordinates",
+            depends_on={"tic_v8"},
+            writes_to={"source"}
+        )
+        tasks["targeting_cartons"] = MigrationTask(
+            name="targeting_cartons",
+            func=migrate_targeting_cartons,
+            description="Ingesting targeting cartons",
+            depends_on={"galactic_coords"},
+            writes_to={"source"}
+        )
+        '''
+        tasks["visit_counts"] = MigrationTask(
+            name="visit_counts",
+            func=update_visit_spectra_counts,
+            description="Updating visit spectra counts",
+            depends_on={"sdss_id_fields"},  # Only needs sources to exist
+            writes_to={"source"}
+        )
+        '''
+        tasks["w1w2_mags"] = MigrationTask(
+            name="w1w2_mags",
+            func=compute_w1mag_and_w2mag,
+            description="Computing W1, W2 mags",
+            depends_on={"unwise"},  # Needs unWISE photometry
+            writes_to={"source"}
+        )
+
+        # --- BOSS spectrum updates ---
+        # Always include these tasks when --metadata is set; they'll no-op if no spectra exist
+        # Only depend on source creation if we're actually ingesting new spectra
+        boss_task_deps = (source_deps or boss_deps) if boss_deps else set()
+        tasks["specfull_metadata"] = MigrationTask(
+            name="specfull_metadata",
+            func=migrate_specfull_metadata_from_image_headers,
+            description="Ingesting specFull metadata",
+            depends_on=boss_task_deps,
+            writes_to={"boss_visit_spectrum"},
+            exclusive=True  # Uses internal process pool
+        )
+        tasks["f_night_boss"] = MigrationTask(
+            name="f_night_boss",
+            func=compute_f_night_time_for_boss_visits,
+            description="Computing f_night for BOSS visits",
+            depends_on={"specfull_metadata"},
+            writes_to={"boss_visit_spectrum"}
+        )
+
+        # --- APOGEE spectrum updates ---
+        # Always include these tasks when --metadata is set; they'll no-op if no spectra exist
+        # Only depend on source creation if we're actually ingesting new spectra
+        apogee_task_deps = (source_deps or apogee_deps) if apogee_deps else set()
+        tasks["dithered_metadata"] = MigrationTask(
+            name="dithered_metadata",
+            func=migrate_dithered_metadata,
+            description="Ingesting APOGEE dithered metadata",
+            depends_on=apogee_task_deps,
+            writes_to={"apogee_visit_spectrum"}
+        )
+        tasks["fix_apogee_flags"] = MigrationTask(
+            name="fix_apogee_flags",
+            func=fix_unsigned_apogee_flags,
+            description="Fix unsigned APOGEE flags",
+            depends_on=apogee_task_deps,
+            writes_to={"apogee_visit_spectrum"}
+        )
+        tasks["f_night_apogee"] = MigrationTask(
+            name="f_night_apogee",
+            func=compute_f_night_time_for_apogee_visits,
+            description="Computing f_night for APOGEE visits",
+            depends_on=apogee_task_deps,
+            writes_to={"apogee_visit_spectrum"}
+        )
+
+        # --- Extinction (depends on photometry and distances) ---
+        if extinction:
+            # Start preloading dust maps early (no writes, so can run in parallel with photometry)
+            # This populates OS file cache so the actual reddening computation loads maps faster
+            '''
+            tasks["preload_dust_maps"] = MigrationTask(
+                name="preload_dust_maps",
+                func=preload_dust_maps,
+                description="Preloading dust maps",
+                depends_on=source_deps or spectra_deps,
+                writes_to=set()  # No writes, allows parallel execution with other source tasks
+            )
+            '''
+            # Actual reddening computation depends on dust map preload AND photometry
+            tasks["reddening"] = MigrationTask(
+                name="reddening",
+                func=update_reddening,
+                description="Computing extinction",
+                #depends_on={"preload_dust_maps", "twomass", "unwise", "glimpse", "bailer_jones"} & (tasks.keys() | {"preload_dust_maps"}),
+                depends_on={"twomass", "unwise", "glimpse", "bailer_jones"} & (tasks.keys()),
+                writes_to={"source"}
+            )
+
+    # Remove tasks with unsatisfied dependencies (from disabled features)
+    tasks = get_satisfiable_tasks(tasks)
+
+    if not tasks:
+        typer.echo("No migration tasks to run.")
+        return
+
+    # Set up progress display
+    console = Console(file=sys.stdout) if in_airflow_context else Console()
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -599,192 +978,24 @@ def migrate(
         TimeRemainingColumn(),
     )
 
-    def create_live_renderable():
-        """Create the live renderable layout"""
-        return Panel(progress, title="Migration Progress", border_style="blue")
-
-    ptq = []
+    # Run the scheduler
     try:
-        with Live(create_live_renderable(), console=console, redirect_stdout=False, redirect_stderr=False, refresh_per_second=4) as live:
+        with Live(
+            Panel(progress, title="Migration Progress", border_style="blue"),
+            console=console,
+            redirect_stdout=False,
+            redirect_stderr=False,
+            refresh_per_second=4,
+            transient=True  # Remove display when complete
+        ):
             log.handlers.clear()
-            def process_task(target, *args, description=None, **kwargs):
-                queue = mp.Queue()
-
-                kwds = dict(queue=queue)
-                kwds.update(kwargs)
-                # Set the multiprocessing start method to 'spawn' to avoid logger inheritance issues
-                process = mp.Process(target=wrapper, args=(target, *args), kwargs=kwds)
-                process.start()
-
-                task = progress.add_task(description=(description or ""), total=None)
-                return (process, task, queue)
-
-            def update_display():
-                """Update the live display"""
-                live.update(create_live_renderable())
-
-            import time
-            last_update = 0
-
-            def update_display_throttled():
-                """Update display, but not more than once per second"""
-                nonlocal last_update
-                current_time = time.time()
-                if current_time - last_update > 1.0:  # Update at most once per second
-                    update_display()
-                    last_update = current_time
-
-            if apred is not None or run2d is not None:
-                if apred is not None:
-                    if apred == "dr17":
-                        from astra.migrations.new_apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb
-                        ptq.append(process_task(migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, description="Ingesting APOGEE dr17 spectra"))
-                    else:
-                        ptq.append(
-                            process_task(
-                                migrate_apogee_spectra_from_sdss5_apogee_drpdb,
-                                apred,
-                                limit=limit,
-                                incremental=incremental,
-                                description=f"Ingesting APOGEE {apred} spectra"
-                            )
-                        )
-                if run2d is not None:
-                    ptq.append(process_task(migrate_from_spall_file, run2d, description=f"Ingesting BOSS {run2d} spectra"))
-
-                awaiting = set(t for p, t, q in ptq)
-                while awaiting:
-                    for p, t, q in ptq:
-                        try:
-                            r = q.get(False)
-                            if r is Ellipsis:
-                                progress.update(t, completed=True)
-                                awaiting.remove(t)
-                                p.join()
-                                progress.update(t, visible=False)
-                            elif isinstance(r, Exception):
-                                log.exception(r)
-                                raise r
-                            else:
-                                progress.update(t, **r)
-                                if "completed" in r and r.get("completed", None) == 0:
-                                    # reset the task
-                                    progress.reset(t)
-                        except mp.queues.Empty:
-                            pass
-
-                    # Update log display periodically
-                    update_display_throttled()
-
-            # Now that we have sources and spectra, we can do other things.
-            if metadata:
-                ptq = [
-                    process_task(migrate_gaia_source_ids, description="Ingesting Gaia DR3 source IDs"),
-                    process_task(migrate_twomass_photometry, description="Ingesting 2MASS photometry"),
-                    process_task(migrate_unwise_photometry, description="Ingesting unWISE photometry"),
-                    process_task(migrate_glimpse_photometry, description="Ingesting GLIMPSE photometry"),
-                    process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
-
-
-                    process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
-                    #process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),
-                    process_task(migrate_apogee_visits_in_apStar_files, "1.5", description="Creating ApogeeVisitSpectrumInApStar entries"),
-                    process_task(migrate_healpix, description="Ingesting HEALPix values"),
-                    process_task(migrate_tic_v8_identifier, description="Ingesting TIC v8 identifiers"),
-                    process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),
-                    process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
-                    process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
-                    process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),
-                    process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),
-                ]
-                # reddening needs unwise, 2mass, glimpse,
-                task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
-                # These need to be run in sequence
-                additional_gaia_task_partials = [
-                    (migrate_gaia_dr3_astrometry_and_photometry, dict(description="Ingesting Gaia DR3 astrometry and photometry")),
-                    (migrate_zhang_stellar_parameters, dict(description="Ingesting Zhang stellar parameters")),
-                    (migrate_bailer_jones_distances, dict(description="Ingesting Bailer-Jones distances")),
-                    (migrate_gaia_synthetic_photometry, dict(description="Ingesting Gaia synthetic photometry")),
-                    (compute_n_neighborhood, dict(description="Computing n_neighborhood")),
-                ]
-                ptq_gaia = []
-                reddening_requires = {task_twomass, task_unwise, task_glimpse, task_gaia}
-                started_reddening = False
-                awaiting = set(t for p, t, q in ptq)
-                while awaiting:
-                    additional_tasks = []
-                    for p, t, q in ptq:
-                        try:
-                            r = q.get(False)
-                            if r is Ellipsis:
-                                progress.update(t, completed=True)
-                                try:
-                                    awaiting.remove(t)
-                                except:
-                                    None
-                                p.join()
-                                progress.update(t, visible=False)
-                                if (t == task_gaia or t in ptq_gaia) and len(additional_gaia_task_partials) > 0:
-                                    f, kwds = additional_gaia_task_partials.pop(0)
-                                    new_task = process_task(f, **kwds)
-                                    additional_tasks.append(new_task)
-                                    ptq_gaia.append(new_task)
-                                    if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
-                                        reddening_requires.update({new_task})
-
-                                if t == task_specfull:
-                                    additional_tasks.append(
-                                        process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
-                                    )
-                                elif t == task_unwise:
-                                    additional_tasks.append(
-                                        process_task(compute_w1mag_and_w2mag, description="Computing W1, W2 mags")
-                                    )
-                                if not started_reddening and not (awaiting & reddening_requires) and extinction:
-                                    started_reddening = True
-                                    additional_tasks.append(process_task(update_reddening, description="Computing extinction"))
-                            elif isinstance(r, Exception):
-                                log.exception(r)
-                                raise r
-                            else:
-                                progress.update(t, **r)
-                                if "completed" in r and r.get("completed", None) == 0:
-                                    # reset the task
-                                    progress.reset(t)
-
-                        except mp.queues.Empty:
-                            pass
-
-                    ptq.extend(additional_tasks)
-                    awaiting |= set(t for p, t, q in additional_tasks)
-
-                    # Update log display periodically
-                    update_display_throttled()
+            scheduler = MigrationScheduler(tasks, progress)
+            scheduler.run()
 
     except KeyboardInterrupt:
-        """
-        with silenced():
-            import psutil
-            parent = psutil.Process(os.getpid())
-            for child in parent.children(recursive=True):
-                child.kill()
-        """
         raise KeyboardInterrupt
 
-@app.command()
-def grant_permissions(
-    group: str = typer.Argument(..., help="The UNIX group to grant permissions to."),
-):
-    """Grant permissions on the Astra database schema to a UNIX group."""
-    from astra.models.base import BaseModel, database
-    from astra.utils import log
-
-    schema = BaseModel._meta.schema
-    log.info(f"Granting permissions on schema {schema} to group '{group}'")
-    database.execute_sql(
-        f"grant all privileges on schema {schema} to group {group};"
-        f"grant all privileges on all tables in schema {schema} to {group};"
-    )
+    typer.echo(f"Migration complete. {len(tasks)} tasks executed.")
 
 
 
@@ -796,55 +1007,69 @@ def init(
     """Initialize the Astra database."""
 
     from time import sleep
-    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
     from importlib import import_module
     from astra.models.base import (database, BaseModel)
     from astra.models.pipeline import PipelineOutputModel
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TimeRemainingColumn(),
-        transient=not in_airflow_context
-    ) as progress:
+    init_model_packages = (
+        "apogee",
+        "boss",
+        "bossnet",
+        "apogeenet",
+        "astronn_dist",
+        "astronn",
+        "source",
+        "spectrum",
+        "line_forest",
+        "mwm"
+    )
+    for package in init_model_packages:
+        import_module(f"astra.models.{package}")
 
-        init_model_packages = (
-            "apogee",
-            "boss",
-            "bossnet",
-            "apogeenet",
-            "astronn_dist",
-            "astronn",
-            "source",
-            "spectrum",
-            "line_forest",
-            "mwm"
-        )
-        for package in init_model_packages:
-            import_module(f"astra.models.{package}")
+    schema = BaseModel._meta.schema
+    database.execute_sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
-        models = (
-            set(BaseModel.__subclasses__())
-        |   set(PipelineOutputModel.__subclasses__())
-        ) - {PipelineOutputModel}
+    typer.echo(f"Initializing Astra database schema '{schema}'...")
 
-        if drop_tables:
-            tables_to_drop = [m for m in models if m.table_exists()]
-            if delay > 0:
-                t = progress.add_task(description=f"About to drop {len(tables_to_drop)} tables..", total=delay)
-                for i in range(delay):
-                    progress.advance(t)
-                    sleep(1)
+    models = (
+        set(BaseModel.__subclasses__())
+    |   set(PipelineOutputModel.__subclasses__())
+    ) - {PipelineOutputModel}
 
-            with database.atomic():
-                database.drop_tables(tables_to_drop, cascade=True)
-            progress.remove_task(t)
+    if drop_tables:
+        tables_to_drop = [m for m in models if m.table_exists()]
+        if delay > 0:
+            typer.echo(f"About to drop {len(tables_to_drop)} tables in {delay} seconds...")
+            sleep(delay)
 
-        t = progress.add_task(description=f"Creating tables", total=len(models))
         with database.atomic():
-            database.create_tables(models)
+            database.drop_tables(tables_to_drop, cascade=True)
+        typer.echo(f"Dropped {len(tables_to_drop)} tables.")
 
-    typer.echo(f"Created {len(models)} tables in the Astra database.")
+    with database.atomic():
+        database.create_tables(models)
+
+    typer.echo(f"Created {len(models)} tables in the Astra database:")
+    for m in models:
+        typer.echo(f" - {m._meta.schema}.{m._meta.table_name}")
+
+    database.execute_sql(
+        f"grant all privileges on schema {schema} to group sdss;"
+        f"grant all privileges on all tables in schema {schema} to sdss;"
+    )
+    typer.echo(f"Granted all privileges on schema '{schema}' to group 'sdss'.")
+    admin_uids = ["u6033276"]
+    for uid in admin_uids:
+        database.execute_sql(
+            f"GRANT ALL PRIVILEGES ON SCHEMA {schema} TO {uid};"
+            f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {schema} TO {uid};"
+            f"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {schema} TO {uid};"
+            f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} "
+            f"GRANT ALL PRIVILEGES ON TABLES TO {uid};"
+            f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} "
+            f"GRANT ALL PRIVILEGES ON SEQUENCES TO {uid};"
+        )
+        typer.echo(f"Granted all privileges on schema '{schema}' to admin user '{uid}'.")
 
 if __name__ == "__main__":
     app()

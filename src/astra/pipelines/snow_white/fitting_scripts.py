@@ -119,13 +119,14 @@ def norm_spectra(spectra,model=True,add_infinity=False,mod=True):
                 #find mean and save
                 elif n_range_s[j]=='M':
                     snr[j,0:2] = np.mean(l), np.mean(f)
-                else: print('Unknown n_range_s, ignoring')
+                #else:
+                #    print('Unknown n_range_s, ignoring')
     snr = snr[ snr[:,0] != 0 ]
     #t parameter chosen by eye. Position of knots.
     if snr[:,0].max() < 6460: knots =[4100,4340,4500,4860,int(snr[:,0].max()-5)]
     else: knots = [3885,4340,4900,6460,7500]
     if snr[:,0].min() > 3885:
-        print('Warning: knots used for spline norm unsuitable for high order fitting')
+        #print('Warning: knots used for spline norm unsuitable for high order fitting')
         knots=knots[1:]
     if (snr[:,0].min() > 4340) or (snr[:,0].max() < 4901):
         knots=None # 'Warning: knots used probably bad'
@@ -417,9 +418,9 @@ def hot_vs_cold_col(T1,g1,T2,g2,bp_rp,emu,wref):
     M_bol_sun, Teff_sun, Rsun_cm, R_sun_pc = 4.75, 5780., 69.5508e9, 2.2539619954370203e-08
     R1=R_from_Teff_logg(T1, g1)
     R2=R_from_Teff_logg(T2, g2)
-    print(T1,g1,"parameters1")
-    print(T2,g2,"parameters2")
-    print("bp_rp=",bp_rp)
+    #print(T1,g1,"parameters1")
+    #print(T2,g2,"parameters2")
+    #print("bp_rp=",bp_rp)
     flux1=generate_modelDA(T1,g1*100,emu)
     wave1=wref
     flux2=generate_modelDA(T2,g2*100,emu)
@@ -479,8 +480,8 @@ def synthG(spectrum_w,spectrum_f):
     spec_flux = spectrum_f[ind]
     a = np.trapz( ifT[ind] * spec_flux*spectrum_w[ind], spectrum_w[ind], axis=-1)
     b = np.trapz( ifT[ind]*spectrum_w[ind], spectrum_w[ind])
-    if (np.isinf(a).any() | np.isinf(b).any()):
-        print("Warn for inf value")
+    #if (np.isinf(a).any() | np.isinf(b).any()):
+    #    #print("Warn for inf value")
     nf=a/b
     ew=5836.
     c=2.99792e10
@@ -503,8 +504,8 @@ def synthBp(spectrum_w,spectrum_f):
     spec_flux = spectrum_f[ind]
     a = np.trapz( ifT[ind] * spec_flux*spectrum_w[ind], spectrum_w[ind], axis=-1)
     b = np.trapz( ifT[ind]*spectrum_w[ind], spectrum_w[ind])
-    if (np.isinf(a).any() | np.isinf(b).any()):
-        print("Warn for inf value")
+    #if (np.isinf(a).any() | np.isinf(b).any()):
+    #     print("Warn for inf value")
     nf=a/b
     ew=5035.75
     c=2.99792e10
@@ -528,8 +529,8 @@ def synthRp(spectrum_w,spectrum_f):
     spec_flux = spectrum_f[ind]
     a = np.trapz( ifT[ind] * spec_flux*spectrum_w[ind], spectrum_w[ind], axis=-1)
     b = np.trapz( ifT[ind]*spectrum_w[ind], spectrum_w[ind])
-    if (np.isinf(a).any() | np.isinf(b).any()):
-        print("Warn for inf value")
+    #if (np.isinf(a).any() | np.isinf(b).any()):
+    #    print("Warn for inf value")
     nf=a/b
     ew=7619.96
     c=2.99792e10

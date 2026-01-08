@@ -7,6 +7,7 @@ import scipy.interpolate
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
 import os
+import warnings
 
 from astra.utils import expand_path
 
@@ -28,7 +29,7 @@ def bb(l,T,scale):
     f /= l
     f /= (np.exp( 1.438e8 / (l*T) ) -1)*scale
     #f=(f/np.sum(f))*np.size(f)
-    return f 
+    return f
 
 def line_info(wave,flux,err):
     #bin spectrum for anchor points
@@ -99,7 +100,7 @@ def line_info(wave,flux,err):
     errs=np.array(errs)
 
     t0=[10000,1e-8]
-    
+
 
     s = scipy.interpolate.InterpolatedUnivariateSpline(start_n,fluxes,w=1/errs)#,s=1)#InterpolatedUnivariateSpline
     y=s(wave)
@@ -118,9 +119,9 @@ def line_info(wave,flux,err):
     fluxes_wdms=np.array(fluxes_wdms)
     start_wdms=np.array(start_wdms)
     errs_wdms=np.array(errs_wdms)
-    
 
-    
+
+
     #p0 = (1,1)# start with values near those we expect
     #params, cv = scipy.optimize.curve_fit(ex_d,start_wdms,fluxes_wdms, p0)
     #a,b = params
@@ -132,7 +133,7 @@ def line_info(wave,flux,err):
     bbwdms=bb(wave,T_wdms[0],T_wdms[1])
 
 
-    
+
     fluxes_pec=[]
     errs_pec=[]
     for xxx in start_pec:
@@ -153,13 +154,15 @@ def line_info(wave,flux,err):
     #params, cv = scipy.optimize.curve_fit(ex_d,start_pec,fluxes_pec, p0)
     #a,b = params
     #bbpec=ex_d(wave,a, b)
-    try:
-        T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[12000,1e-10],sigma=errs_pec)
-    except:
-        T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-10],sigma=errs_pec)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[12000,1e-10],sigma=errs_pec)
+        except:
+            T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-10],sigma=errs_pec)
     residuals = fluxes_pec- bb(start_pec, T_pec1[0],T_pec1[1])
     ss_res1 = np.sum(residuals**2)
-    #T_pec2,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-13])#,sigma=errs_pec)    
+    #T_pec2,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-13])#,sigma=errs_pec)
     #residuals = fluxes_pec- bb(start_pec, T_pec2[0],T_pec2[1])
     #ss_res2 = np.sum(residuals**2)
     #if ss_res2<ss_res1:
@@ -178,7 +181,7 @@ def line_info(wave,flux,err):
     core=np.max(flux[(wave>6555)&(wave<6570)])#np.mean(flux[np.logical_and(wave>6555,wave<6570)]/y[np.logical_and(wave>6555,wave<6570)])
     emission=core/minimum
     #print(emission,"BOOOM")
-#==================================================================== 
+#====================================================================
 #=====================================================
     #plt.plot(wave_a,flux_a,c="0.7")
     #plt.plot(wave,y,c="b")
@@ -234,7 +237,7 @@ def line_info(wave,flux,err):
                 #print(ratio_line)
                 features.extend(ratio_line)
         features=np.array(features)
-        
+
 #------------------------------------------------------------------------------------------------------------------
         result[type]=features
     #print(emission,"HERE")
@@ -242,7 +245,5 @@ def line_info(wave,flux,err):
     all_lines=np.concatenate((result['DA'],result['DB'],result['DQ'],result['DZ'],result['WDMS'],result['Pec'],result['hDQ'],emission,emission2),axis=None)#,emission2
     #print(all_lines)
     # all_lines=np.array([result['DA'][0],result['DA'][1],result['DA'][2],result['DA'][3],result['DA'][4],result['DA'][5],result['DB'][0],result['DB'][1],result['DB'][2],result['DB'][3],result['DB'][4],result['DB'][5],result['DB'][6],result['DB'][7],result['DB'][8],result['DB'][9],result['DB'][10],result['DB'][11],result['DB'][12],result['DQ'][0],result['DQ'][1],result['DZ'][0],result['DZ'][1],result['WDMS'][0],result['WDMS'][1],result['WDMS'][2],result['WDMS'][3]])
-    
-    return all_lines
- 
 
+    return all_lines

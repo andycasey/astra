@@ -58,7 +58,7 @@ else:
     else:
         p_class=predictions[0]+":"
 
-print("Classified as:", p_class)
+#print("Classified as:", p_class)
 if p_class=="DA" or p_class=="DA:":
 
     spectra=np.stack((wave,flux,err),axis=-1)
@@ -194,15 +194,15 @@ if p_class=="DA" or p_class=="DA:":
     #perr2 = np.sqrt(np.diag(cov))
     T2_err=np.sqrt(np.diag(cov))[0]*3
     g2_err=np.sqrt(np.diag(cov))[1]
-    
+
 
 #========================use gaia G mag and parallax to solve for hot vs cold solution
-    
+
     T_true=fitting_scripts.hot_vs_cold(best_T,best_g/100,best_T2,best_g2/100,parallax,Gmag,emu,wref)
     if T_true==best_T:
         print("Solution: Teff=",best_T,"+-",perr[0]," log g=",best_g,"+-",perr[1]," rv=",best_rv)#,"+-",perr[2])
     elif T_true==best_T2:
-        
+
         print("Solution: Teff=",best_T2,"+-",T2_err," log g=",best_g2,"+-",g2_err," rv=",best_rv2)#,"+-",perr2[2])
 
 
@@ -212,7 +212,7 @@ if p_class=="DA" or p_class=="DA:":
     # Get and save the 2 best lines from the spec and model, and the full models
         lines_s,lines_m,mod_n=fitting_scripts.fit_func((best_T,best_g,best_rv),
                                                    spec_n,l_crop,emu,wref,mode=1)
-    
+
         lines_s_o,lines_m_o,mod_n_o=fitting_scripts.fit_func((best_T2,best_g2,best_rv),
                                                          spec_n,l_crop,emu,wref,mode=1)
         fig=plt.figure(figsize=(8,5))
@@ -236,7 +236,7 @@ if p_class=="DA" or p_class=="DA:":
         #    full_spec=np.loadtxt(sys.argv[1],usecols=(0,1),unpack=True).transpose()
         full_spec=np.stack((wave,flux,err),axis=-1)
         full_spec = full_spec[(np.isnan(full_spec[:,1])==False) & (full_spec[:,0]>3500)& (full_spec[:,0]<7900)]
-        
+
 
     # Adjust the flux of models to match the spectrum
         check_f_spec=full_spec[:,1][(full_spec[:,0]>4500.) & (full_spec[:,0]<4550.)]
@@ -244,7 +244,7 @@ if p_class=="DA" or p_class=="DA:":
         adjust=np.average(check_f_model)/np.average(check_f_spec)
         ax2.plot(full_spec[:,0],full_spec[:,1],color='k')
         ax2.plot(mod_n[:,0]*(best_rv+c)/c,(mod_n[:,1]/adjust),color='r')
-    
+
         check_f_model_o=mod_n_o[:,1][(mod_n_o[:,0]>4500.) & (mod_n_o[:,0]<4550.)]
         adjust_o=np.average(check_f_model_o)/np.average(check_f_spec)
         ax2.plot(mod_n_o[:,0]*(best_rv+c)/c,mod_n_o[:,1]/adjust_o,color='g')

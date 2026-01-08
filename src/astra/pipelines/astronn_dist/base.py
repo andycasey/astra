@@ -2,24 +2,25 @@ import numpy as np
 import multiprocessing as mp
 from itertools import cycle
 from time import time, sleep
-from tqdm import tqdm
-
+import warnings
 from astra.utils import log
 from astra.models.astronn_dist import AstroNNdist
 
 import tensorflow_probability as tfp
-from astroNN.apogee import apogee_continuum 
+from astroNN.apogee import apogee_continuum
 from astroNN.gaia import extinction_correction, fakemag_to_pc
 
 
 def _prepare_data(spectrum):
-    try:
-        N, P = np.atleast_2d(spectrum.flux).shape
-        flux = np.atleast_2d(spectrum.flux).reshape((N, P))
-        e_flux = np.atleast_2d(spectrum.ivar**-0.5).reshape((N, P))
-        bitmask = np.atleast_2d(spectrum.pixel_flags).reshape((N, P))
-    except:
-        return (spectrum.spectrum_pk, spectrum.source_pk, None, None, None, None, None)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        try:
+            N, P = np.atleast_2d(spectrum.flux).shape
+            flux = np.atleast_2d(spectrum.flux).reshape((N, P))
+            e_flux = np.atleast_2d(spectrum.ivar**-0.5).reshape((N, P))
+            bitmask = np.atleast_2d(spectrum.pixel_flags).reshape((N, P))
+        except:
+            return (spectrum.spectrum_pk, spectrum.source_pk, None, None, None, None, None)
 
     #### continuum normalization
     P_new = 7514
@@ -89,7 +90,7 @@ def _inference(model, batch):
 
     if len(all_flux) > 0:
         N_param = len(model.targetname)
-    
+
         #### astroNN prediction: K-band absolute magnitude and distance
         all_flux = np.atleast_2d(all_flux).reshape((-1, 7514))
         try:
@@ -100,7 +101,7 @@ def _inference(model, batch):
             k_mag_cor = extinction_correction(all_meta[0][0], all_meta[0][2])
             #pc, pc_err = fakemag_to_pc(fakemag, k_mag_cor, fakemag_err['total']) # for the TensorFlow version
             pc, pc_err = fakemag_to_pc(fakemag, k_mag_cor, fakemag_err) # for the PyTorch version
-    
+
         #### record results
         mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
         for i, (spectrum_pk, source_pk) in enumerate(zip(spectrum_pks, source_pks)):
@@ -162,14 +163,12 @@ def parallel_batch_read(target, spectra, batch_size, cpu_count=None):
         p.start()
         qps.append((q, p))
 
-    log.info(f"Distributing spectra")
     B, batch = (0, [])
-    for i, ((q, p), spectrum) in enumerate(zip(cycle(qps), tqdm(spectra, total=0))):
+    for i, ((q, p), spectrum) in enumerate(zip(cycle(qps), spectra)):
         q.put(spectrum)
 
     for (q, p) in qps:
         q.put(None)
-    log.info(f"Done")
 
     N_done = 0
     while True:
@@ -192,7 +191,7 @@ def parallel_batch_read(target, spectra, batch_size, cpu_count=None):
 
     if batch:
         yield batch
-    
+
     for q, p in qps:
         p.join()
 
@@ -213,7 +212,7 @@ def get_metadata(spectrum):
     #mdata_means = np.array([10.702106344460235, 0.0])
     mdata_replacements = np.zeros(3, dtype=float) # k_mag, ebv, a_k_mag
 
-    metadata = np.zeros(3, dtype=float) # k_mag, ebv, a_k_mag 
+    metadata = np.zeros(3, dtype=float) # k_mag, ebv, a_k_mag
     try:
         metadata[0] = spectrum.source.k_mag # 2MASS K-band apparent magnitude
     except:
@@ -224,13 +223,13 @@ def get_metadata(spectrum):
     except:
         missing_extinction = True
 
-    #### calculate A_K from E(B-V) 
+    #### calculate A_K from E(B-V)
     #### YS note: A_K = 0.918*(H-4.5mu-0.08)= 0.918*E(B-V)/(E(B-V)_0/E(H-4.5mu)_0) = 0.918*E(B-V)/2.61
-    metadata[2] = metadata[1]*0.3517  
+    metadata[2] = metadata[1]*0.3517
 
     #### replace bad values with 0.0
     de_nanify = lambda x: x if (x != "NaN" and x != -999999 and x is not None) else np.nan
-    
+
     metadata = np.array(list(map(de_nanify, metadata)))
 
     missing_photometry = np.any(

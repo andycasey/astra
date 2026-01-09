@@ -28,13 +28,13 @@ LARGE = 1e3
 from tqdm import tqdm
 
 @task
-def snow_white(spectra: Iterable[BossCombinedSpectrum], **kwargs) -> Iterable[SnowWhite]:
+def snow_white_filter(spectra: Iterable[BossCombinedSpectrum], **kwargs) -> Iterable[SnowWhite]:
     for spectrum in spectra:
         if "mwm_wd" not in spectrum.source.sdss5_cartons["program"]:
             yield SnowWhite.from_spectrum(spectrum, flag_not_mwm_wd=True)
 
 @task
-def _snow_white(
+def snow_white(
     spectra: Iterable[BossCombinedSpectrum],
     debug=False,
     plot=True,

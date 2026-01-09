@@ -14,28 +14,9 @@ from astra.pipelines.corv import models, fit, utils
 
 __all__ = ["corv"]
 
-
 @task
 def corv(
-    spectra: Optional[Iterable[BossVisitSpectrum]] = (
-        BossVisitSpectrum
-        .select()
-        .join(SnowWhite, on=(BossVisitSpectrum.spectrum_pk == SnowWhite.spectrum_pk))
-        .switch(BossVisitSpectrum)
-        .join(
-            Corv,
-            JOIN.LEFT_OUTER, 
-            on=(
-                (BossVisitSpectrum.spectrum_pk == Corv.spectrum_pk)
-            &   (Corv.v_astra == __version__)
-            )
-        )
-        .where(
-            Corv.spectrum_pk.is_null()
-        &   (SnowWhite.classification == "DA")
-        &   (BossVisitSpectrum.run2d == "v6_1_3")
-        )
-    ),
+    spectra: Iterable[BossVisitSpectrum],
     max_workers: Optional[int] = 32
 ) -> Iterable[Corv]:
     """
@@ -50,7 +31,7 @@ def corv(
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
     futures = [executor.submit(_corv, s, model) for s in spectra]
-    
+
     with tqdm(total=len(futures)) as pb:
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
@@ -59,14 +40,29 @@ def corv(
 
 
 def _corv(spectrum, corv_model):
-    
+
+    # If this is
+    if "mwm_wd" not in spectrum.source.sdss5_cartons["program"]:
+        return Corv.from_spectrum(spectrum, flag_not_mwm_wd=True)
+
+    # Check whether SnowWhite classified this as a DA-type white dwarf or not
+    try:
+        r = SnowWhite.get(source=spectrum.source)
+    except SnowWhite.DoesNotExist:
+        return Corv.from_spectrum(spectrum, flag_no_wd_classification=True)
+    else:
+        if r.classification is None:
+            return Corv.from_spectrum(spectrum, flag_no_wd_classification=True)
+        if not r.classification.startswith("DA"):
+            return Corv.from_spectrum(spectrum, flag_not_da_type=True)
+
     args = (spectrum.wavelength, spectrum.flux, spectrum.ivar, corv_model)
     try:
         v_rad, e_v_rad, rchi2, result = fit.fit_corv(*args, iter_teff=True)
     except:
         log.exception(f"Exception when running corv on {spectrum}")
         return None
-    
+
     try:
         fig = utils.lineplot(*args, result.params)
         folders = f"{str(spectrum.spectrum_pk)[-4:-2]}/{str(spectrum.spectrum_pk)[-2:]}"
@@ -87,11 +83,11 @@ def _corv(spectrum, corv_model):
         e_teff=result.params["teff"].stderr,
         logg=result.params["logg"].value,
         e_logg=result.params["logg"].stderr,
-        rchi2=rchi2,            
+        rchi2=rchi2,
         initial_teff=result.init_values["teff"],
         initial_logg=result.init_values["logg"],
         initial_v_rad=result.init_values["RV"],
-    )    
+    )
 
 
 
@@ -100,7 +96,7 @@ def test_corv_rvs():
     from astra.models import Source
     from astropy.table import Table
     df = Table.read(expand_path("$MWM_ASTRA/pipelines/corv/astra_comparison_df.csv"))
-    
+
     model = models.make_montreal_da_model()
 
     x = df["RV_corv_nb"]
@@ -125,7 +121,7 @@ def test_corv_rvs():
             y.append(np.nan)
             y_err.append(np.nan)
             raise
-        
+
         else:
             y.append(v_rad)
             y_err.append(e_v_rad)

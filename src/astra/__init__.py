@@ -10,14 +10,14 @@ __version__ = "0.8.0"
 
 @decorator
 def task(
-    function, 
-    *args, 
+    function,
+    *args,
     group_by=None,
     live: bool = False,
     batch_size: int = 1000,
     write_frequency: int = 300,
     write_to_database: bool = True,
-    re_raise_exceptions: bool = False, 
+    re_raise_exceptions: bool = True,
     **kwargs
 ):
     """
@@ -31,36 +31,34 @@ def task(
 
     :param live: [optional]
         If `True` then results will be yielded as they are completed, even if not yet
-        written to the database. If `False` (default) then results will be written to 
+        written to the database. If `False` (default) then results will be written to
         the database in batches and then yielded. Keep this `False` if you plan to do
-        anything with the results. You can use `True` if you just want to know the 
+        anything with the results. You can use `True` if you just want to know the
         task status.
 
     :param batch_size: [optional]
         The number of rows to insert per batch (default: 1000).
-    
+
     :param write_frequency: [optional]
         The number of seconds to wait before saving the results to the database (default: 300).
-    
+
     :param write_to_database: [optional]
         If `True` (default), results will be written to the database. Otherwise, they will be ignored.
 
     :param re_raise_exceptions: [optional]
         If `True` (default), exceptions raised in the task will be raised. Otherwise, they will be logged and ignored.
 
-    :param **kwargs: 
+    :param **kwargs:
         Keyword arguments for the task and the task decorator. See below.
     """
 
     if not isgeneratorfunction(function):
         log.warning(f"Tasks should be generators that `yield` results, but {function} does not `yield`.")
 
-    print(batch_size, kwargs)    
-
     n, results = (0, [])
     with Timer(
-        function(*args, **kwargs), 
-        frequency=write_frequency, 
+        function(*args, **kwargs),
+        frequency=write_frequency,
         attr_t_elapsed="t_elapsed",
         attr_t_overhead="t_overhead",
     ) as timer:
@@ -76,12 +74,12 @@ def task(
                 else:
                     results.append(result)
                     n += 1
-            
+
             except StopIteration:
                 break
 
             except:
-                log.exception(f"Exception raised in task {function.__name__}")        
+                log.exception(f"Exception raised in task {function.__name__}")
                 if re_raise_exceptions:
                     raise
 
@@ -95,7 +93,7 @@ def task(
                         except:
                             log.exception(f"Exception trying to insert results to database:")
                             if re_raise_exceptions:
-                                raise 
+                                raise
                         finally:
                             results = [] # avoid memory leak, which can happen if we are running
                             n = 0
@@ -119,15 +117,15 @@ def task(
 def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=True):
     """
     Insert a batch of results to the database.
-    
+
     :param results:
-        A list of records to create (e.g., sub-classes of `astra.models.BaseModel`).    
+        A list of records to create (e.g., sub-classes of `astra.models.BaseModel`).
     """
     #log.info(f"Bulk inserting {len(results)} into the database")
 
     if len(results) == 0:
-        return 
-        
+        return
+
     first = results[0]
     database, model = (first._meta.database, first.__class__)
     # Here, `preserve` is the set of fields that we want to overwrite if there is a conflict.
@@ -149,9 +147,9 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
             model
             .insert_many(r.__data__ for r in results)
             .returning(
-                model.task_pk, 
+                model.task_pk,
                 first_conflict_target,
-                model.v_astra, 
+                model.v_astra,
                 model.created
             )
             .on_conflict(
@@ -169,7 +167,7 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
             for r in results:
                 if getattr(r, first_conflict_target_name) in offending_reference_pk:
                     log.error(f"Offending record {getattr(r, first_conflict_target_name)}: {r.__data__}")
-            
+
             if avoid_integrity_exceptions:
                 log.error("Going to ignore the second records and try again.")
                 pks = set()
@@ -201,10 +199,10 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
 
 
 def generate_queries_for_task(
-    task, 
-    input_model=None, 
+    task,
+    input_model=None,
     sdss_ids=None,
-    limit=None, 
+    limit=None,
     page=None
 ):
     """
@@ -214,14 +212,14 @@ def generate_queries_for_task(
 
     :param task:
         The task name, or callable.
-    
+
     :param input_model: [optional]
         The input spectrum model. If `None` is given then a query will be generated for each
         spectrum model expected by the task, based on the task function signature.
-    
+
     :param sdss_ids: [optional]
-        A list of SDSS IDs to filter the input model. 
-    
+        A list of SDSS IDs to filter the input model.
+
     :param limit: [optional]
         Limit the number of rows for each spectrum model query.
     """
@@ -242,7 +240,7 @@ def generate_queries_for_task(
 
     output_model = get_return_type(fun)
     group_by_string = get_task_group_by_string(fun)
-    
+
     for input_model in input_models:
         if input_model == Source:
             where = (
@@ -255,8 +253,8 @@ def generate_queries_for_task(
                 Source
                 .select()
                 .join(
-                    output_model, 
-                    JOIN.LEFT_OUTER, 
+                    output_model,
+                    JOIN.LEFT_OUTER,
                     on=(
                         (output_model.v_astra_major_minor == current_version)
                     &   (Source.pk == output_model.source_pk)
@@ -265,7 +263,7 @@ def generate_queries_for_task(
                 .where(where)
                 .order_by(Source.modified.desc())
             )
-        else:                
+        else:
             where = (
                 output_model.spectrum_pk.is_null()
             |   (input_model.modified > output_model.modified)
@@ -294,7 +292,7 @@ def generate_queries_for_task(
                     group_by_resolved.append(getattr(input_model, item))
                 else:
                     group_by_resolved.append(item)
-            
+
             q = q.group_by(*group_by_resolved)
 
         if limit is not None:
@@ -307,6 +305,6 @@ def generate_queries_for_task(
 
 try:
     config = get_config(NAME)
-    
+
 except FileNotFoundError:
     log.exception(f"No configuration file found for {NAME}:")

@@ -251,7 +251,6 @@ def fill_dr17_apogee_catalogids(batch_size: int = 10000, queue=None):
                 n_updated += len(pk_batch)
                 update_step.update(advance=len(pk_batch))
 
-    log.info(f"Filled in catalogid for {n_updated} DR17 APOGEE spectra")
     return n_updated
 
 
@@ -413,7 +412,7 @@ def create_sources_from_spectra(batch_size: int = 1000, queue=None):
                     )
                     create_step.update(advance=len(chunk))
 
-    sun_pk = Source.get(sdss4_apogee_id="VESTA").source_pk
+    sun_pk = Source.get(sdss4_apogee_id="VESTA").pk
     with database.atomic():
         (
             ApogeeVisitSpectrum
@@ -638,8 +637,7 @@ def create_sources_and_link_spectra(batch_size: int = 1000, queue=None):
     # Step 3: Link APOGEE spectra
     n_apogee_linked = link_apogee_spectra_to_sources(batch_size=batch_size, queue=queue)
 
-    raise a
-    log.info(f"Filled {n_dr17_filled} DR17 catalogids, created {n_new_sources} new sources, linked {n_boss_linked} BOSS and {n_apogee_linked} APOGEE spectra")
+    #log.info(f"Filled {n_dr17_filled} DR17 catalogids, created {n_new_sources} new sources, linked {n_boss_linked} BOSS and {n_apogee_linked} APOGEE spectra")
 
     queue.put(Ellipsis)
     return (n_new_sources, n_boss_linked, n_apogee_linked)

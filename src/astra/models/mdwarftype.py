@@ -1,8 +1,8 @@
 from playhouse.hybrid import hybrid_property
 from astra.fields import (FloatField, TextField, BitField)
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
-class MDwarfType(PipelineOutputModel):
+class MDwarfType(PipelineOutputMixin):
 
     """M-dwarf type classifier."""
 

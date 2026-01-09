@@ -1,8 +1,8 @@
 from astra.fields import (ArrayField, FloatField, IntegerField, BitField)
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
 
-class NMFRectify(PipelineOutputModel):
+class NMFRectify(PipelineOutputMixin):
     
     #> Continuum Fitting
     log10_W = ArrayField(FloatField, null=True, help_text="log10(W) NMF coefficients to compute spectra")

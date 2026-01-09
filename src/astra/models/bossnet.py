@@ -1,8 +1,8 @@
 from playhouse.hybrid import hybrid_property
 from astra.fields import (FloatField, BitField)
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
-class BossNet(PipelineOutputModel):
+class BossNet(PipelineOutputMixin):
 
     """A result from the BOSSNet pipeline."""
     

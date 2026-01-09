@@ -9,9 +9,9 @@ from astra.fields import (
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from playhouse.hybrid import hybrid_property
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
-class MWMBest(PipelineOutputModel):
+class MWMBest(PipelineOutputMixin):
 
     """The best of possibly many bad options."""
     

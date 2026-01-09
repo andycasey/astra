@@ -9,8 +9,9 @@ class SpectrumMixin(object):
 
     @property
     def e_flux(self):
-        e_flux = self.ivar**-0.5
-        e_flux[~np.isfinite(e_flux)] = 1e10
+        with np.errstate(divide='ignore'):
+            e_flux = self.ivar**-0.5
+            e_flux[~np.isfinite(e_flux)] = 1e10
         return e_flux
 
 

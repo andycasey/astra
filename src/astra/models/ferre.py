@@ -18,7 +18,7 @@ from astra.models.spectrum import Spectrum
 from functools import cached_property
 
 from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name)
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
 APOGEE_FERRE_MASK = get_apogee_pixel_mask()
 
@@ -113,7 +113,7 @@ class FerreOutputMixin:
         return array
 
 
-class FerreCoarse(PipelineOutputModel, FerreOutputMixin):
+class FerreCoarse(PipelineOutputMixin, FerreOutputMixin):
 
     #> Grid and Working Directory
     pwd = TextField(default="")
@@ -234,7 +234,7 @@ class FerreCoarse(PipelineOutputModel, FerreOutputMixin):
         )  
     '''          
 
-class FerreStellarParameters(PipelineOutputModel, FerreOutputMixin):
+class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
 
     source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
@@ -366,7 +366,7 @@ class FerreStellarParameters(PipelineOutputModel, FerreOutputMixin):
     '''
 
 
-class FerreChemicalAbundances(PipelineOutputModel, FerreOutputMixin):
+class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
 
     # We need to ovverride these from the FerreOutputMixin class because the `flux` and `e_flux`
     # arrays are in the parent directory.

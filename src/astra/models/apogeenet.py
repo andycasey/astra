@@ -1,8 +1,8 @@
 from playhouse.hybrid import hybrid_property
 from astra.fields import (FloatField, BitField)
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
     
-class ApogeeNet(PipelineOutputModel): 
+class ApogeeNet(PipelineOutputMixin): 
 
     """A result from the APOGEENet (version 3) pipeline."""
     

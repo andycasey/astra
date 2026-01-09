@@ -7,7 +7,7 @@ from astra.fields import (
     TextField,
 )    
 from playhouse.hybrid import hybrid_property
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
 class PaynePixelArrayAccessor(BasePixelArrayAccessor):
     
@@ -50,7 +50,7 @@ class PaynePixelArray(PixelArray):
         )
 
 
-class ThePayne(PipelineOutputModel):
+class ThePayne(PipelineOutputMixin):
 
     """A result from The Payne."""
         

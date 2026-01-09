@@ -8,9 +8,9 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from playhouse.hybrid import hybrid_property
 
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
-class AstroNN(PipelineOutputModel):
+class AstroNN(PipelineOutputMixin):
 
     """A result from the AstroNN pipeline."""
 

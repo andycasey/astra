@@ -10,7 +10,7 @@ from astra.fields import (
     BooleanField,
     IntegerField,
 )
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
 class SlamPixelArrayAccessor(BasePixelArrayAccessor):
     
@@ -52,7 +52,7 @@ class SlamPixelArray(PixelArray):
         
 
 
-class Slam(PipelineOutputModel):
+class Slam(PipelineOutputMixin):
 
     """A result from the 'Stellar Labels Machine'."""
     

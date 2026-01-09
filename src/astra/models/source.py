@@ -45,6 +45,13 @@ class Source(BaseModel):
     n_associated = IntegerField(null=True)
     n_neighborhood = IntegerField(default=-1)
 
+    #> Cross-match Status Flags
+    # Tracks whether cross-matches have been attempted (regardless of success)
+    # This allows incremental processing: only sources without the flag set need processing
+    crossmatch_flags = BitField(default=0)
+    flag_gaia_dr3_crossmatch_attempted = crossmatch_flags.flag(2**0)
+    flag_gaia_dr2_crossmatch_attempted = crossmatch_flags.flag(2**1)
+
     # Only do sdss5_target_flags if we are using a PostgreSQL database, as SQLite does not support it.
     if isinstance(database, PostgresqlDatabase):
         sdss5_target_flags = BigBitField(null=True)

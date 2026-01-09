@@ -9,7 +9,7 @@ from astra.fields import (
     PixelArray, BitField, LogLambdaArrayAccessor,
     BasePixelArrayAccessor
 )
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
 class IntermediatePixelArrayAccessor(BasePixelArrayAccessor):
 
@@ -46,7 +46,7 @@ class IntermediatePixelArray(PixelArray):
         )
 
 
-class SnowWhite(PipelineOutputModel):
+class SnowWhite(PipelineOutputMixin):
 
     """A result from the white-dwarf pipeline, affectionally known as Snow White."""
 
@@ -99,6 +99,7 @@ class SnowWhite(PipelineOutputModel):
     flag_logg_grid_edge_bad = result_flags.flag(2**3, help_text="LOGG is edge of grid")
     flag_no_flux = result_flags.flag(2**4, help_text="Spectrum has no flux")
     flag_not_mwm_wd = result_flags.flag(2**5, help_text="Object is not in the `mwm_wd` program")
+    flag_missing_bp_rp_mag = result_flags.flag(2**6, help_text="Missing Gaia BP-RP color for prior on Teff")
 
     #> Spectral Data
     wavelength = PixelArray(

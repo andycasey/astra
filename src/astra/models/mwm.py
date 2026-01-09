@@ -10,7 +10,7 @@ from astra.fields import (
 )
 from astra.models.base import BaseModel
 from astra.models.boss import BossVisitSpectrum
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum, SpectrumMixin
 from astra.glossary import Glossary

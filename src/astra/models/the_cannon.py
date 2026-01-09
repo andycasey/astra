@@ -10,7 +10,7 @@ from astra.fields import (
     TextField,
     BooleanField,
 )    
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 from astra.utils import log, expand_path
 
 
@@ -59,7 +59,7 @@ class TheCannonPixelArray(PixelArray):
 # These two models are simply to link spectra to records in the database
 
 '''
-class TrainingSet(PipelineOutputModel):
+class TrainingSet(PipelineOutputMixin):
 
     pk = AutoField()
     name = TextField(unique=True)
@@ -79,7 +79,7 @@ class TrainingSet(PipelineOutputModel):
         return expand_path(self.path)
 
 
-class TrainingSetSpectrum(PipelineOutputModel):
+class TrainingSetSpectrum(PipelineOutputMixin):
 
     training_set_pk = ForeignKeyField(TrainingSet)
     spectrum_pk = ForeignKeyField(Spectrum)
@@ -87,7 +87,7 @@ class TrainingSetSpectrum(PipelineOutputModel):
 '''
 
 
-class TheCannon(PipelineOutputModel):
+class TheCannon(PipelineOutputMixin):
 
     """Stellar labels estimated using The Cannon."""
     

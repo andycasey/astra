@@ -1009,7 +1009,6 @@ def init(
     from time import sleep
     from importlib import import_module
     from astra.models.base import (database, BaseModel)
-    from astra.models.pipeline import PipelineOutputModel
 
     init_model_packages = (
         "apogee",
@@ -1021,7 +1020,11 @@ def init(
         "source",
         "spectrum",
         "line_forest",
-        "mwm"
+        "mwm",
+        "snow_white",
+        "corv",
+        "slam",
+        "mdwarftype"
     )
     for package in init_model_packages:
         import_module(f"astra.models.{package}")
@@ -1031,10 +1034,13 @@ def init(
 
     typer.echo(f"Initializing Astra database schema '{schema}'...")
 
-    models = (
-        set(BaseModel.__subclasses__())
-    |   set(PipelineOutputModel.__subclasses__())
-    ) - {PipelineOutputModel}
+    # For Mixin models, only create sub-classes of them
+    models = []
+    for model in BaseModel.__subclasses__():
+        if model.__name__.endswith("Mixin"):
+            models.extend(model.__subclasses__())
+        else:
+            models.append(model)
 
     if drop_tables:
         tables_to_drop = [m for m in models if m.table_exists()]

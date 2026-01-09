@@ -11,7 +11,7 @@ from astra.fields import (
     BooleanField,    
 )
 
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 from astra.models.ferre import FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
@@ -57,7 +57,7 @@ class ASPCAPPixelArrayAccessor(BasePixelArrayAccessor):
             return instance.__pixel_data__[self.name]
         return self.field
     
-class ASPCAP(PipelineOutputModel):
+class ASPCAP(PipelineOutputMixin):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
     

@@ -1,25 +1,13 @@
 import datetime
 from astra import __version__
-from astra.fields import (AutoField, DateTimeField, FloatField, TextField, IntegerField, ForeignKeyField)
+from astra.fields import (AutoField, DateTimeField, FloatField, TextField, IntegerField, ForeignKeyField, BitField)
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
-class Corv(PipelineOutputModel):
+class Corv(PipelineOutputMixin):
 
     """A result from the `corv` pipeline."""
-
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
 
     #> Radial Velocity (corv)
     v_rad = FloatField(null=True)
@@ -38,4 +26,8 @@ class Corv(PipelineOutputModel):
 
     #> Summary Statistics
     rchi2 = FloatField(null=True)
-    result_flags = IntegerField(null=True)
+    result_flags = BitField(default=0)
+
+    flag_not_mwm_wd = result_flags.flag(2**5, help_text="Object is not in the `mwm_wd` program")
+    flag_no_wd_classification = result_flags.flag(2**6, help_text="No SnowWhite classification available")
+    flag_not_da_type = result_flags.flag(2**7, help_text="Object is not classified as DA-type by SnowWhite")

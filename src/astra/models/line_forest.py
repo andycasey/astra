@@ -1,7 +1,7 @@
 from astra.fields import ArrayField, FloatField
-from astra.models.pipeline import PipelineOutputModel
+from astra.models.pipeline import PipelineOutputMixin
 
-class LineForest(PipelineOutputModel):
+class LineForest(PipelineOutputMixin):
 
     """A result from the LineForest pipeline."""
     

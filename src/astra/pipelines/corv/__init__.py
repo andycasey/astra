@@ -5,7 +5,9 @@ from peewee import JOIN
 from typing import Iterable, Optional
 from tqdm import tqdm
 from astra import task, __version__
-from astra.models import BossVisitSpectrum, Corv, SnowWhite
+from astra.models.boss import BossVisitSpectrum
+from astra.models.corv import Corv
+from astra.models.snow_white import SnowWhite
 from astra.models.mwm import BossCombinedSpectrum
 from astra.utils import log, expand_path
 
@@ -17,7 +19,8 @@ __all__ = ["corv"]
 @task
 def corv(
     spectra: Iterable[BossVisitSpectrum],
-    max_workers: Optional[int] = 32
+    max_workers: Optional[int] = 32,
+    **kwargs
 ) -> Iterable[Corv]:
     """
     Fit the radial velocity and stellar parameters for white dwarfs.
@@ -30,7 +33,29 @@ def corv(
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
-    futures = [executor.submit(_corv, s, model) for s in spectra]
+    # Pre-fetch all data needed for filtering before submitting to process pool.
+    # Database connections cannot be shared across processes in PostgreSQL.
+    futures = []
+    for spectrum in spectra:
+        # Pre-fetch database-dependent data in the main process
+        try:
+            is_mwm_wd = "mwm_wd" in spectrum.source.sdss5_cartons["program"]
+        except:
+            yield Corv.from_spectrum(spectrum, flag_not_mwm_wd=True)
+            continue
+
+        try:
+            snow_white_result = SnowWhite.get(source_pk=spectrum.source_pk)
+            classification = snow_white_result.classification
+        except SnowWhite.DoesNotExist:
+            yield Corv.from_spectrum(spectrum, flag_no_wd_classification=True)
+            continue
+
+        if not classification.startswith("DA"):
+            yield Corv.from_spectrum(spectrum, flag_not_da_type=True)
+            continue
+
+        futures.append(executor.submit(_corv, spectrum, model))
 
     with tqdm(total=len(futures)) as pb:
         for future in concurrent.futures.as_completed(futures):
@@ -41,21 +66,7 @@ def corv(
 
 def _corv(spectrum, corv_model):
 
-    # If this is
-    if "mwm_wd" not in spectrum.source.sdss5_cartons["program"]:
-        return Corv.from_spectrum(spectrum, flag_not_mwm_wd=True)
-
-    # Check whether SnowWhite classified this as a DA-type white dwarf or not
-    try:
-        r = SnowWhite.get(source=spectrum.source)
-    except SnowWhite.DoesNotExist:
-        return Corv.from_spectrum(spectrum, flag_no_wd_classification=True)
-    else:
-        if r.classification is None:
-            return Corv.from_spectrum(spectrum, flag_no_wd_classification=True)
-        if not r.classification.startswith("DA"):
-            return Corv.from_spectrum(spectrum, flag_not_da_type=True)
-
+    # Check if object is in mwm_wd program (pre-fetched in main process)
     args = (spectrum.wavelength, spectrum.flux, spectrum.ivar, corv_model)
     try:
         v_rad, e_v_rad, rchi2, result = fit.fit_corv(*args, iter_teff=True)

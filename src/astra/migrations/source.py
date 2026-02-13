@@ -14,6 +14,24 @@ from peewee import JOIN, chunked, fn, BigIntegerField, TextField
 from astra.migrations.utils import ProgressContext
 from astra.utils import log
 
+def update_sdss5_dr19_apogee_flag(chunk_size: int = 1000):
+    from astropy.io import fits
+    from tqdm import tqdm
+
+    with fits.open("/uufs/chpc.utah.edu/common/home/sdss50/dr19/spectro/astra/0.6.0/summary/mwmAllStar-0.6.0.fits.gz") as image:
+        sdss_ids = list(set(image[2].data["sdss_id"]).difference({0, -1}))
+
+    from astra.models import Source
+    for chunk in tqdm(chunked(sdss_ids, chunk_size)):
+        (
+            Source
+            .update(sdss5_dr19_apogee_flag=True)
+            .where(Source.sdss_id.in_(chunk))
+            .execute()
+        )
+
+
+
 
 def merge_sources(keep_pk: int, remove_pk: int, database=None) -> None:
     """

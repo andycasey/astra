@@ -223,6 +223,13 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
             )
             .execute()
         )
-        BossRestFrameVisitSpectrum.bulk_create(visit_spectra)
+        try:
+            BossRestFrameVisitSpectrum.bulk_create(visit_spectra)
+        except:
+            print(f"v_astra match: {visit_spectra[0].v_astra}")
+            print([v.drp_spectrum_pk for v in visit_spectra])
+            for v in visit_spectra:
+                print(v.__data__)
+
 
     return (coadd_spectrum, visit_spectra)

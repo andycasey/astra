@@ -6,6 +6,8 @@ from astra.models.apogee import (
 )
 from astra.models.boss import BossVisitSpectrum
 from astra.models.mwm import BossCombinedSpectrum
+from astra.models.corv import Corv
+
 """
 from astra.models.apogeenet import ApogeeNet
 from astra.models.apogeenet_v2 import ApogeeNetV2
@@ -15,7 +17,6 @@ from astra.models.base import BaseModel
 from astra.models.bossnet import BossNet
 from astra.models.boss import BossVisitSpectrum
 from astra.models.classifier import SpectrumClassification
-from astra.models.corv import Corv
 from astra.models.ferre import (
     FerreChemicalAbundances,
     FerreCoarse,

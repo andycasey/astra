@@ -61,14 +61,15 @@ def migrate_healpix(
             try:
                 record.healpix = ang2pix(nside, record.ra, record.dec, lonlat=lonlat)
             except ValueError:
-                continue
-        updated += (
-            Source
-            .bulk_update(
-                batch,
-                fields=[Source.healpix],
+                record.healpix = -1
+        with database.atomic():
+            updated += (
+                Source
+                .bulk_update(
+                    batch,
+                    fields=[Source.healpix],
+                )
             )
-        )
         queue.put(dict(advance=len(batch)))
 
     queue.put(Ellipsis)
@@ -256,30 +257,31 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
             update.append(source)
 
         if update:
-            updated += (
-                Source
-                .bulk_update(
-                    update,
-                    fields=[
-                        Source.zgr_teff,
-                        Source.zgr_logg,
-                        Source.zgr_fe_h,
-                        Source.zgr_e_teff,
-                        Source.zgr_e_logg,
-                        Source.zgr_e_fe_h,
-                        Source.zgr_e,
-                        Source.zgr_plx,
-                        Source.zgr_e_e,
-                        Source.zgr_e_plx,
-                        Source.zgr_teff_confidence,
-                        Source.zgr_logg_confidence,
-                        Source.zgr_fe_h_confidence,
-                        Source.zgr_quality_flags,
-                        Source.zgr_ln_prior,
-                        Source.zgr_chi2
-                    ]
+            with database.atomic():
+                updated += (
+                    Source
+                    .bulk_update(
+                        update,
+                        fields=[
+                            Source.zgr_teff,
+                            Source.zgr_logg,
+                            Source.zgr_fe_h,
+                            Source.zgr_e_teff,
+                            Source.zgr_e_logg,
+                            Source.zgr_e_fe_h,
+                            Source.zgr_e,
+                            Source.zgr_plx,
+                            Source.zgr_e_e,
+                            Source.zgr_e_plx,
+                            Source.zgr_teff_confidence,
+                            Source.zgr_logg_confidence,
+                            Source.zgr_fe_h_confidence,
+                            Source.zgr_quality_flags,
+                            Source.zgr_ln_prior,
+                            Source.zgr_chi2
+                        ]
+                    )
                 )
-            )
 
         queue.put(dict(advance=batch_size))
 

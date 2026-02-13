@@ -1,4 +1,5 @@
 from astropy.io import fits
+from astra import __version__
 from astra.utils import expand_path
 from astra.fields import (
     BitField,
@@ -115,9 +116,7 @@ class SnowWhite(PipelineOutputMixin):
     @property
     def intermediate_output_path(self):
         folders = f"{str(self.spectrum_pk)[-4:-2]:0>2}/{str(self.spectrum_pk)[-2:]:0>2}"
-        return f"$MWM_ASTRA/{self.v_astra}/pipelines/snow_white/{folders}/{self.spectrum_pk}.fits"
-
-
+        return f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{self.spectrum_pk}.fits"
 
 def apply_noise_model():
 

@@ -13,6 +13,53 @@ from scipy.interpolate import BPoly, interp1d
 #from . import polynomial as pl
 from numpy.polynomial import polynomial as pl
 
+
+def _polyreloc(c, x0):
+    """
+    Relocate polynomial coefficients.
+
+    Given polynomial p(x) with coefficients c (where p(x) = c[0] + c[1]*x + c[2]*x^2 + ...),
+    compute coefficients of p(x + x0).
+
+    This is a replacement for numpy.polynomial.polynomial.polyreloc which was removed
+    in newer NumPy versions.
+
+    Parameters
+    ----------
+    c : array_like
+        Polynomial coefficients (low-to-high order)
+    x0 : scalar
+        The shift amount
+
+    Returns
+    -------
+    c_new : ndarray
+        Coefficients of the shifted polynomial
+    """
+    c = np.asarray(c)
+    n = len(c)
+    if n == 0:
+        return c.copy()
+
+    # Build the transformation matrix using binomial coefficients
+    # p(x + x0) = sum_i c_i * (x + x0)^i = sum_i c_i * sum_j C(i,j) * x^j * x0^(i-j)
+    # Rearranging: coefficient of x^j is sum_{i>=j} c_i * C(i,j) * x0^(i-j)
+
+    c_new = np.zeros(n, dtype=c.dtype)
+    x0_powers = np.array([x0**k for k in range(n)])
+
+    from scipy.special import comb
+    for j in range(n):
+        for i in range(j, n):
+            c_new[j] += c[i] * comb(i, j, exact=True) * x0_powers[i - j]
+
+    return c_new
+
+
+# Monkey-patch the polyreloc function into the pl module if it doesn't exist
+if not hasattr(pl, 'polyreloc'):
+    pl.polyreloc = _polyreloc
+
 __all__ = [
     'PPform', 'savitzky_golay', 'savitzky_golay_piecewise', 'sgolay2d',
     'SmoothSpline', 'pchip_slopes', 'slopes', 'stineman_interp', 'Pchip',

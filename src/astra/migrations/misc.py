@@ -408,16 +408,17 @@ def compute_w1mag_and_w2mag(
             source.e_w2_mag = (2.5 / np.log(10)) * von(source.w2_dflux) / von(source.w2_flux)
             source.modified = now
 
-        n_updated += Source.bulk_update(
-            batch,
-            fields=[
-                Source.w1_mag,
-                Source.e_w1_mag,
-                Source.w2_mag,
-                Source.e_w2_mag,
-                Source.modified,
-            ]
-        )
+        with database.atomic():
+            n_updated += Source.bulk_update(
+                batch,
+                fields=[
+                    Source.w1_mag,
+                    Source.e_w1_mag,
+                    Source.w2_mag,
+                    Source.e_w2_mag,
+                    Source.modified,
+                ]
+            )
         queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
@@ -608,6 +609,19 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
         batch.append(row)
 
         if len(batch) >= batch_size:
+            with database.atomic():
+                model.bulk_update(
+                    batch,
+                    fields=[
+                        model.irfm_teff,
+                        model.irfm_teff_flags,
+                    ]
+                )
+            n_updated += batch_size
+            batch = []
+
+    if len(batch) > 0:
+        with database.atomic():
             model.bulk_update(
                 batch,
                 fields=[
@@ -615,17 +629,6 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
                     model.irfm_teff_flags,
                 ]
             )
-            n_updated += batch_size
-            batch = []
-
-    if len(batch) > 0:
-        model.bulk_update(
-            batch,
-            fields=[
-                model.irfm_teff,
-                model.irfm_teff_flags,
-            ]
-        )
         n_updated += len(batch)
 
     return n_updated
@@ -694,6 +697,20 @@ def compute_casagrande_irfm_effective_temperatures(
         batch.append(row)
 
         if len(batch) >= batch_size:
+            with database.atomic():
+                model.bulk_update(
+                    batch,
+                    fields=[
+                        model.irfm_teff,
+                        model.e_irfm_teff,
+                        model.irfm_teff_flags,
+                    ]
+                )
+            n_updated += batch_size
+            batch = []
+
+    if len(batch) > 0:
+        with database.atomic():
             model.bulk_update(
                 batch,
                 fields=[
@@ -702,18 +719,6 @@ def compute_casagrande_irfm_effective_temperatures(
                     model.irfm_teff_flags,
                 ]
             )
-            n_updated += batch_size
-            batch = []
-
-    if len(batch) > 0:
-        model.bulk_update(
-            batch,
-            fields=[
-                model.irfm_teff,
-                model.e_irfm_teff,
-                model.irfm_teff_flags,
-            ]
-        )
         n_updated += len(batch)
 
     return n_updated
@@ -742,130 +747,132 @@ def update_visit_spectra_counts(
     if queue is None:
         queue = ProgressContext()
 
-    # Early return - function disabled for now
-    queue.put(Ellipsis)
-    return None
+    schema = Source._meta.schema
 
     # Update APOGEE counts - only for sources with NULL n_apogee_visits
     # First get the source_pks that need updating
-    queue.put(dict(total=None, completed=0, description="Finding sources needing APOGEE counts"))
+    if ApogeeVisitSpectrum.select().count() > 0:
 
-    source_pks_needing_apogee = list(
-        Source
-        .select(Source.pk)
-        .where(Source.n_apogee_visits.is_null())
-        .tuples()
-    )
-    source_pks_needing_apogee = [row[0] for row in source_pks_needing_apogee]
+        queue.put(dict(total=None, completed=0, description="Finding sources needing APOGEE counts"))
 
-    if source_pks_needing_apogee:
-        total = len(source_pks_needing_apogee)
-        queue.put(dict(total=total, completed=0, description=f"Updating APOGEE counts for {total} sources"))
+        source_pks_needing_apogee = list(
+            Source
+            .select(Source.pk)
+            .where(Source.n_apogee_visits.is_null())
+            .tuples()
+        )
+        source_pks_needing_apogee = [row[0] for row in source_pks_needing_apogee]
 
-        for chunk in chunked(source_pks_needing_apogee, batch_size):
-            pks_str = ",".join(str(pk) for pk in chunk)
+        if source_pks_needing_apogee:
+            total = len(source_pks_needing_apogee)
+            queue.put(dict(total=total, completed=0, description=f"Updating APOGEE counts for {total} sources"))
 
-            sql = f"""
-                WITH counts AS (
-                    SELECT
-                        source_pk,
-                        COUNT(*) as n_apogee_visits,
-                        MIN(mjd) as apogee_min_mjd,
-                        MAX(mjd) as apogee_max_mjd
-                    FROM apogee_visit_spectrum
-                    WHERE source_pk IN ({pks_str})
-                    GROUP BY source_pk
-                )
-                UPDATE source
-                SET
-                    n_apogee_visits = counts.n_apogee_visits,
-                    apogee_min_mjd = counts.apogee_min_mjd,
-                    apogee_max_mjd = counts.apogee_max_mjd,
-                    modified = NOW()
-                FROM counts
-                WHERE source.pk = counts.source_pk
-            """
-            with database.atomic():
-                database.execute_sql(sql)
+            for chunk in chunked(source_pks_needing_apogee, batch_size):
+                pks_str = ",".join(str(pk) for pk in chunk)
 
-            # Also set n_apogee_visits=0 for sources with no spectra
-            pks_with_spectra_result = database.execute_sql(f"""
-                SELECT DISTINCT source_pk FROM apogee_visit_spectrum
-                WHERE source_pk IN ({pks_str})
-            """).fetchall()
-            pks_with_spectra = {row[0] for row in pks_with_spectra_result}
-            pks_without_spectra = [pk for pk in chunk if pk not in pks_with_spectra]
-
-            if pks_without_spectra:
-                pks_no_spectra_str = ",".join(str(pk) for pk in pks_without_spectra)
+                sql = f"""
+                    WITH counts AS (
+                        SELECT
+                            source_pk,
+                            COUNT(*) as n_apogee_visits,
+                            MIN(mjd) as apogee_min_mjd,
+                            MAX(mjd) as apogee_max_mjd
+                        FROM {schema}.apogee_visit_spectrum
+                        WHERE source_pk IN ({pks_str})
+                        GROUP BY source_pk
+                    )
+                    UPDATE {schema}.source
+                    SET
+                        n_apogee_visits = counts.n_apogee_visits,
+                        apogee_min_mjd = counts.apogee_min_mjd,
+                        apogee_max_mjd = counts.apogee_max_mjd,
+                        modified = NOW()
+                    FROM counts
+                    WHERE {schema}.source.pk = counts.source_pk
+                """
                 with database.atomic():
-                    database.execute_sql(f"""
-                        UPDATE source
-                        SET n_apogee_visits = 0, modified = NOW()
-                        WHERE pk IN ({pks_no_spectra_str}) AND n_apogee_visits IS NULL
-                    """)
+                    database.execute_sql(sql)
 
-            queue.put(dict(advance=len(chunk)))
-
-    # Update BOSS counts - only for sources with NULL n_boss_visits
-    queue.put(dict(total=None, completed=0, description="Finding sources needing BOSS counts"))
-
-    source_pks_needing_boss = list(
-        Source
-        .select(Source.pk)
-        .where(Source.n_boss_visits.is_null())
-        .tuples()
-    )
-    source_pks_needing_boss = [row[0] for row in source_pks_needing_boss]
-
-    if source_pks_needing_boss:
-        total = len(source_pks_needing_boss)
-        queue.put(dict(total=total, completed=0, description=f"Updating BOSS counts for {total} sources"))
-
-        for chunk in chunked(source_pks_needing_boss, batch_size):
-            pks_str = ",".join(str(pk) for pk in chunk)
-
-            sql = f"""
-                WITH counts AS (
-                    SELECT
-                        source_pk,
-                        COUNT(*) as n_boss_visits,
-                        MIN(mjd) as boss_min_mjd,
-                        MAX(mjd) as boss_max_mjd
-                    FROM boss_visit_spectrum
+                # Also set n_apogee_visits=0 for sources with no spectra
+                pks_with_spectra_result = database.execute_sql(f"""
+                    SELECT DISTINCT source_pk FROM {schema}.apogee_visit_spectrum
                     WHERE source_pk IN ({pks_str})
-                    GROUP BY source_pk
-                )
-                UPDATE source
-                SET
-                    n_boss_visits = counts.n_boss_visits,
-                    boss_min_mjd = counts.boss_min_mjd,
-                    boss_max_mjd = counts.boss_max_mjd,
-                    modified = NOW()
-                FROM counts
-                WHERE source.pk = counts.source_pk
-            """
-            with database.atomic():
-                database.execute_sql(sql)
+                """).fetchall()
+                pks_with_spectra = {row[0] for row in pks_with_spectra_result}
+                pks_without_spectra = [pk for pk in chunk if pk not in pks_with_spectra]
 
-            # Also set n_boss_visits=0 for sources with no spectra
-            pks_with_spectra_result = database.execute_sql(f"""
-                SELECT DISTINCT source_pk FROM boss_visit_spectrum
-                WHERE source_pk IN ({pks_str})
-            """).fetchall()
-            pks_with_spectra = {row[0] for row in pks_with_spectra_result}
-            pks_without_spectra = [pk for pk in chunk if pk not in pks_with_spectra]
+                if pks_without_spectra:
+                    pks_no_spectra_str = ",".join(str(pk) for pk in pks_without_spectra)
+                    with database.atomic():
+                        database.execute_sql(f"""
+                            UPDATE {schema}.source
+                            SET n_apogee_visits = 0, modified = NOW()
+                            WHERE pk IN ({pks_no_spectra_str}) AND n_apogee_visits IS NULL
+                        """)
 
-            if pks_without_spectra:
-                pks_no_spectra_str = ",".join(str(pk) for pk in pks_without_spectra)
+                queue.put(dict(advance=len(chunk)))
+
+    if BossVisitSpectrum.select().count() > 0:
+
+        # Update BOSS counts - only for sources with NULL n_boss_visits
+        queue.put(dict(total=None, completed=0, description="Finding sources needing BOSS counts"))
+
+        source_pks_needing_boss = list(
+            Source
+            .select(Source.pk)
+            .where(Source.n_boss_visits.is_null())
+            .tuples()
+        )
+        source_pks_needing_boss = [row[0] for row in source_pks_needing_boss]
+
+        if source_pks_needing_boss:
+            total = len(source_pks_needing_boss)
+            queue.put(dict(total=total, completed=0, description=f"Updating BOSS counts for {total} sources"))
+
+            for chunk in chunked(source_pks_needing_boss, batch_size):
+                pks_str = ",".join(str(pk) for pk in chunk)
+
+                sql = f"""
+                    WITH counts AS (
+                        SELECT
+                            source_pk,
+                            COUNT(*) as n_boss_visits,
+                            MIN(mjd) as boss_min_mjd,
+                            MAX(mjd) as boss_max_mjd
+                        FROM {schema}.boss_visit_spectrum
+                        WHERE source_pk IN ({pks_str})
+                        GROUP BY source_pk
+                    )
+                    UPDATE {schema}.source
+                    SET
+                        n_boss_visits = counts.n_boss_visits,
+                        boss_min_mjd = counts.boss_min_mjd,
+                        boss_max_mjd = counts.boss_max_mjd,
+                        modified = NOW()
+                    FROM counts
+                    WHERE {schema}.source.pk = counts.source_pk
+                """
                 with database.atomic():
-                    database.execute_sql(f"""
-                        UPDATE source
-                        SET n_boss_visits = 0, modified = NOW()
-                        WHERE pk IN ({pks_no_spectra_str}) AND n_boss_visits IS NULL
-                    """)
+                    database.execute_sql(sql)
 
-            queue.put(dict(advance=len(chunk)))
+                # Also set n_boss_visits=0 for sources with no spectra
+                pks_with_spectra_result = database.execute_sql(f"""
+                    SELECT DISTINCT source_pk FROM {schema}.boss_visit_spectrum
+                    WHERE source_pk IN ({pks_str})
+                """).fetchall()
+                pks_with_spectra = {row[0] for row in pks_with_spectra_result}
+                pks_without_spectra = [pk for pk in chunk if pk not in pks_with_spectra]
+
+                if pks_without_spectra:
+                    pks_no_spectra_str = ",".join(str(pk) for pk in pks_without_spectra)
+                    with database.atomic():
+                        database.execute_sql(f"""
+                            UPDATE {schema}.source
+                            SET n_boss_visits = 0, modified = NOW()
+                            WHERE pk IN ({pks_no_spectra_str}) AND n_boss_visits IS NULL
+                        """)
+
+                queue.put(dict(advance=len(chunk)))
 
     queue.put(Ellipsis)
     return None

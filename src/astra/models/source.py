@@ -64,6 +64,7 @@ class Source(BaseModel):
     sdss4_apogee2_target3_flags = BitField(default=0)
     sdss4_apogee_member_flags = BitField(default=0)
     sdss4_apogee_extra_target_flags = BitField(default=0)
+    sdss5_dr19_apogee_flag = BooleanField(default=False)
 
     # sdss4_apogee_target1_flags
     flag_sdss4_apogee_faint = sdss4_apogee_target1_flags.flag(2**0)

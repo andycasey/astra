@@ -140,6 +140,12 @@ class Product(str, Enum):
     astraAllVisitAstroNN = "astraAllVisitAstroNN"
     astraAllStarAstroNNDist = "astraAllStarAstroNNDist"
     astraAllStarSlam = "astraAllStarSlam"
+    astraAllStarMDwarfType = "astraAllStarMDwarfType"
+    astraAllVisitMDwarfType = "astraAllVisitMDwarfType"
+    astraAllVisitCorv = "astraAllVisitCorv"
+
+    astraAllStarSnowWhite = "astraAllStarSnowWhite"
+
 
 
 
@@ -271,6 +277,38 @@ def create(
                     "boss_spectrum_model": BossCombinedSpectrum,
                     "overwrite": overwrite
                 }
+            ),
+            Product.astraAllStarMDwarfType: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "mdwarftype.MDwarfType",
+                    "boss_spectrum_model": BossCombinedSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitMDwarfType: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "mdwarftype.MDwarfType",
+                    "boss_spectrum_model": BossVisitSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitCorv: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "corv.Corv",
+                    "boss_spectrum_model": BossVisitSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllStarSnowWhite: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "snow_white.SnowWhite",
+                    "boss_spectrum_model": BossCombinedSpectrum,
+                    "overwrite": overwrite
+                }
             )
         }
     )
@@ -299,8 +337,9 @@ def srun(
     partition: Annotated[str, typer.Option(help="Slurm partition")] = None,
     qos: Annotated[str, typer.Option(help="Slurm QoS")] = None,
     gres: Annotated[str, typer.Option(help="Slurm generic resources")] = None,
-    mem: Annotated[str, typer.Option(help="Memory per node")] = None,
+    mem: Annotated[str, typer.Option(help="Memory per node")] = 0,
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
+    exclusive: Annotated[bool, typer.Option(help="Use exclusive node allocation.")] = True,
 ):
     """Distribute an Astra task over many nodes using Slurm."""
 
@@ -435,6 +474,8 @@ def srun(
                     f"--output={td}/{n}.out",
                     f"--error={td}/{n}.err",
                 ]
+                if exclusive:
+                    executable.append(f"--exclusive")
                 if qos is not None:
                     executable.append(f"--qos={qos}")
                 if mem is not None:
@@ -874,7 +915,6 @@ def migrate(
             depends_on={"galactic_coords"},
             writes_to={"source"}
         )
-        '''
         tasks["visit_counts"] = MigrationTask(
             name="visit_counts",
             func=update_visit_spectra_counts,
@@ -882,7 +922,6 @@ def migrate(
             depends_on={"sdss_id_fields"},  # Only needs sources to exist
             writes_to={"source"}
         )
-        '''
         tasks["w1w2_mags"] = MigrationTask(
             name="w1w2_mags",
             func=compute_w1mag_and_w2mag,
@@ -956,7 +995,7 @@ def migrate(
                 func=update_reddening,
                 description="Computing extinction",
                 #depends_on={"preload_dust_maps", "twomass", "unwise", "glimpse", "bailer_jones"} & (tasks.keys() | {"preload_dust_maps"}),
-                depends_on={"twomass", "unwise", "glimpse", "bailer_jones"} & (tasks.keys()),
+                depends_on={"targeting_cartons", "w1w2_mags", "twomass", "unwise", "glimpse", "bailer_jones"} & (tasks.keys()),
                 writes_to={"source"}
             )
 

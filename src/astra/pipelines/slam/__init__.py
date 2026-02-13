@@ -1,5 +1,26 @@
 __slam_version__ = "1.2019.0109.4"
+
+# === Compatibility fixes for loading pickled models ===
+# These must be at module level so they're applied when worker processes import this module
+import sys
+
+# Sklearn compatibility: _PredictScorer was renamed to _Scorer in sklearn >= 1.0
+import sklearn.metrics._scorer as _scorer_module
+if not hasattr(_scorer_module, '_PredictScorer'):
+    _scorer_module._PredictScorer = _scorer_module._Scorer
+
+# === End sklearn compatibility fix ===
+
 from .slam3 import Slam3 as SlamCode
+
+# Module alias: the pickled model was created when 'slam' was a top-level module
+# Register this module (astra.pipelines.slam) as 'slam' for backwards compatibility
+# This must be done AFTER imports to avoid circular import issues
+from . import slam3 as _slam3_module
+from . import standardization as _standardization_module
+sys.modules['slam'] = sys.modules[__name__]
+sys.modules['slam.slam3'] = _slam3_module
+sys.modules['slam.standardization'] = _standardization_module
 
 from .laspec.convolution import conv_spec, fwhm2resolution
 from .laspec.qconv import conv_spec_Gaussian
@@ -17,7 +38,35 @@ from astra.models.slam import Slam
 from astropy.table import Table
 from typing import Iterable, Optional
 from astra.models import Source
-#
+
+
+@task
+def slam_filter(spectra: Iterable[BossCombinedSpectrum], **kwargs) -> Iterable[Slam]:
+    for spectrum in spectra:
+
+        source = spectrum.source
+
+        # Check if spectrum passes selection criteria (from Zach Way, mwm-astra 413)
+        passes_magnitude_cut = (
+            source.g_mag is not None
+            and source.rp_mag is not None
+            and source.plx is not None
+            and source.plx > 0
+            and (source.g_mag - source.rp_mag) > 0.56
+            and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
+        )
+        passes_program_cut = (
+            ("mwm_yso" in spectrum.source.sdss5_cartons["program"])
+        or  ("mwm_snc" in spectrum.source.sdss5_cartons["program"])
+        )
+        if not (passes_magnitude_cut or passes_program_cut):
+            yield Slam.from_spectrum(
+                spectrum,
+                flag_not_magnitude_cut=not passes_magnitude_cut,
+                flag_not_carton_match=not passes_program_cut
+            )
+
+
 #  According to the Bible, we’re roughly dealing with an absolute magnitude range M_G in [7.57, 13.35] for M dwarfs between 4000 and 3000 K. It might be worth including this cut when training/running the SLAM
 @task
 def slam(
@@ -26,18 +75,15 @@ def slam(
     limit=None,
     n_jobs=128,
     **kwargs
-) -> Slam:
+) -> Iterable[Slam]:
 
     wave_interp = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/dM_train_wave_standard.csv"))['wave']
     dump_path = expand_path("$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump")
 
-    import sys
-    #sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/")
-    sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/sdss50/software/git/sdss/astra/0.7.0/src/astra/pipelines/")
-    import sklearn.metrics
-    from sklearn.metrics._scorer import _SCORERS
-    Pre = load(dump_path)
-    sys.path.pop(0)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning, message='.*unpickle.*')
+        Pre = load(dump_path)
 
     flux_boss = []
     ivar_boss = []
@@ -46,22 +92,25 @@ def slam(
 
         source = spectrum.source
 
-        if not (
-            (
-                    # From Zach Way, mwm-astra 413
-                    source.g_mag.is_null(False)
-                &   source.rp_mag.is_null(False)
-                &   source.plx.is_null(False)
-                &   (source.plx > 0)
-                &   ((source.g_mag - source.rp_mag) > 0.56)
-                &   ((source.g_mag + 5 + 5 * fn.log10(source.plx/1000)) > 5.553)
-                #&   ((source.g_mag + 5 + 5 * fn.log10(source.plx/1000)) > 7.57)
-                )
-            |   (
-                source.assigned_to_program("mwm_yso")
-            |   source.assigned_to_program("mwm_snc")
+        # Check if spectrum passes selection criteria (from Zach Way, mwm-astra 413)
+        passes_magnitude_cut = (
+            source.g_mag is not None
+            and source.rp_mag is not None
+            and source.plx is not None
+            and source.plx > 0
+            and (source.g_mag - source.rp_mag) > 0.56
+            and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
+        )
+        passes_program_cut = (
+            ("mwm_yso" in spectrum.source.sdss5_cartons["program"])
+        or  ("mwm_snc" in spectrum.source.sdss5_cartons["program"])
+        )
+        if not (passes_magnitude_cut or passes_program_cut):
+            yield Slam.from_spectrum(
+                spectrum,
+                flag_not_magnitude_cut=not passes_magnitude_cut,
+                flag_not_carton_match=not passes_program_cut
             )
-        ):
             continue
 
         # only redshift if it is a visit spectrum (not a stack)

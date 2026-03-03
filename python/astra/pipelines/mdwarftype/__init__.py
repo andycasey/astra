@@ -31,7 +31,7 @@ def mdwarftype(
     rectified_template_flux = np.zeros_like(template_flux)
     for i, f in enumerate(template_flux):
         continuum = np.nanmean(f[mask])
-        rectified_template_flux[i] = rectification_spectrum(f / continuum)
+        rectified_template_flux[i], _ = rectification_spectrum(f / continuum)
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
@@ -66,8 +66,8 @@ def _mdwarf_type(spectra, template_flux, template_type):
             mask = (7495 <= spectrum.wavelength) * (spectrum.wavelength <= 7505)
             continuum = np.nanmean(spectrum.flux[mask])
 
-            flux = rectification_spectrum(spectrum.flux / continuum)
-            ivar = rectification_ivar(spectrum.ivar,flux)
+            flux, rectified_cont = rectification_spectrum(flux / continuum)
+            ivar = rectification_ivar(ivar, rectified_cont)
             chi2s = np.nansum((flux - template_flux)**2 * ivar, axis=1)
             index = np.argmin(chi2s)
             chi2 = chi2s[index]
@@ -126,14 +126,13 @@ def quad_func(x, a, b, c):
 
 
 def rectification_spectrum(spectrum):
-    ev_finite = np.isfinite(spectrum)  # only fit on finite portion of spectrum
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_finite], spectrum[ev_finite]) #fits quadratic function
-    rectified_spec = (spectrum / quad_func(np.arange(0, len(spectrum)), *best_fit[0]) ) - 1 #divides spectrum by best fit
-    return rectified_spec
+    ev_fine = np.isfinite(spectrum)
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_fine], spectrum[ev_fine]) #fits quadratic function
+    rectified_cont = quad_func(np.arange(0, len(spectrum)), *best_fit[0])
+    rectified_spec = (spectrum /rectified_cont ) - 1 #divides spectrum by best fit
+    return rectified_spec, rectified_cont
 
 
-def rectification_ivar(ivar,spectrum):
-    ev_finite = np.isfinite(spectrum)  # only fit on finite portion of spectrum
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_finite], spectrum[ev_finite]) #fits quadratic function
-    rectified_ivar = (ivar * (quad_func(np.arange(0, len(spectrum)), *best_fit[0]))**2 ) #divides spectrum by best fit
+def rectification_ivar(ivar, rectified_cont):
+    rectified_ivar = (ivar * rectified_cont**2 ) #divides spectrum by best fit
     return rectified_ivar

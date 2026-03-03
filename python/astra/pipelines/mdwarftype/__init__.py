@@ -67,11 +67,13 @@ def _mdwarf_type(spectra, template_flux, template_type):
             continuum = np.nanmean(spectrum.flux[mask])
 
             flux, rectified_cont = rectification_spectrum(flux / continuum)
-            ivar = rectification_ivar(ivar, rectified_cont)
+            ivar = rectification_ivar(ivar, rectified_cont * continuum)  # need to add mean continuum to scale!
             chi2s = np.nansum((flux - template_flux)**2 * ivar, axis=1)
             index = np.argmin(chi2s)
             chi2 = chi2s[index]
-            rchi2 = chi2 / (flux.size - 2)
+            # only include nonzero ivar and where template_flux is finite in DOF
+            dof = np.sum((ivar > 0) & np.isfinite(ivar) & np.isfinite(template_flux[index])) - 2
+            rchi2 = chi2 / dof
             
             spectral_type, sub_type = template_type[index]
 

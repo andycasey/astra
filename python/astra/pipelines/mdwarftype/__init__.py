@@ -28,10 +28,11 @@ def mdwarftype(
     # rectify the spectra
     common_wavelength = 10**(3.5523 + 0.0001 * np.arange(4648))
     mask = (7495 <= common_wavelength) * (common_wavelength <= 7505)
+    crop = (5000 <= common_wavelength) & (common_wavelength <= 8800) 
     rectified_template_flux = np.zeros_like(template_flux)
     for i, f in enumerate(template_flux):
         continuum = np.nanmean(f[mask])
-        rectified_template_flux[i], _ = rectification_spectrum(f / continuum)
+        rectified_template_flux[i, crop], _ = rectification_spectrum(f[crop] / continuum)
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
@@ -64,15 +65,16 @@ def _mdwarf_type(spectra, template_flux, template_type):
             #continuum, continuum_meta = f_continuum.fit(spectrum.flux, spectrum.ivar)
             # TODO: replace this with astra.specutils.continuum.Scalar
             mask = (7495 <= spectrum.wavelength) * (spectrum.wavelength <= 7505)
+            crop = (5000 <= spectrum.wavelength) & (spectrum.wavelength <= 8800)  # crop to common range
             continuum = np.nanmean(spectrum.flux[mask])
 
-            flux, rectified_cont = rectification_spectrum(flux / continuum)
-            ivar = rectification_ivar(ivar, rectified_cont * continuum)  # need to add mean continuum to scale!
-            chi2s = np.nansum((flux - template_flux)**2 * ivar, axis=1)
+            flux, rectified_cont = rectification_spectrum(spectrum.flux[crop] / continuum)
+            ivar = rectification_ivar(spectrum.ivar[crop], rectified_cont * continuum)  # need to add mean continuum to scale!
+            chi2s = np.nansum((flux - template_flux[:, crop])**2 * ivar, axis=1)
             index = np.argmin(chi2s)
             chi2 = chi2s[index]
             # only include nonzero ivar and where template_flux is finite in DOF
-            dof = np.sum((ivar > 0) & np.isfinite(ivar) & np.isfinite(template_flux[index])) - 2
+            dof = np.sum((ivar > 0) & np.isfinite(ivar) & np.isfinite(template_flux[index, crop])) - 2
             rchi2 = chi2 / dof
             
             spectral_type, sub_type = template_type[index]

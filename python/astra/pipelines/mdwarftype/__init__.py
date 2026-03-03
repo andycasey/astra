@@ -24,6 +24,14 @@ def mdwarftype(
     """
 
     template_flux, template_type = read_template_fluxes_and_types(template_list)
+    
+    # rectify the spectra
+    common_wavelength = 10**(3.5523 + 0.0001 * np.arange(4648))
+    mask = (7495 <= common_wavelength) * (common_wavelength <= 7505)
+    rectified_template_flux = np.zeros_like(template_flux)
+    for i, f in enumerate(template_flux):
+        continuum = np.nanmean(f[mask])
+        rectified_template_flux[i] = rectification_spectrum(f / continuum)
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
@@ -37,7 +45,7 @@ def mdwarftype(
         #    checked_chunk.append(spectrum)
         #if len(checked_chunk) > 0:
         #    futures.append(executor.submit(_mdwarf_type, checked_chunk, template_flux, template_type))
-        futures.append(executor.submit(_mdwarf_type, chunk, template_flux, template_type))
+        futures.append(executor.submit(_mdwarf_type, chunk, rectified_template_flux, template_type))
 
     with tqdm(total=len(futures), desc="Collecting futures") as pb:
         for future in concurrent.futures.as_completed(futures):

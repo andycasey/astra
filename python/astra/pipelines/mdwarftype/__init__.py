@@ -118,12 +118,14 @@ def quad_func(x, a, b, c):
 
 
 def rectification_spectrum(spectrum):
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
+    ev_finite = np.isfinite(spectrum)  # only fit on finite portion of spectrum
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_finite], spectrum[ev_finite]) #fits quadratic function
     rectified_spec = (spectrum / quad_func(np.arange(0, len(spectrum)), *best_fit[0]) ) - 1 #divides spectrum by best fit
     return rectified_spec
 
 
 def rectification_ivar(ivar,spectrum):
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
+    ev_finite = np.isfinite(spectrum)  # only fit on finite portion of spectrum
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_finite], spectrum[ev_finite]) #fits quadratic function
     rectified_ivar = (ivar * (quad_func(np.arange(0, len(spectrum)), *best_fit[0]))**2 ) #divides spectrum by best fit
     return rectified_ivar

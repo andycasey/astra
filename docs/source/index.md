@@ -11,6 +11,7 @@ hide-toc: true
 user/install
 user/datamodels
 user/pipelines/index
+user/flags
 user/glossary
 ```
 
@@ -27,8 +28,11 @@ cli
 :hidden:
 
 developer/index
-developer/airflow-index
-developer/software-index
+developer/structure
+developer/writing-a-pipeline
+developer/database
+developer/tests
+developer/dags
 ```
 
 

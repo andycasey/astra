@@ -1,36 +1,101 @@
-# Structure
+# Project Structure
 
-This page describes how you should structure any code that you want to add to Astra.
+This page describes the layout of the `src/astra/` source tree and the role of each major directory.
 
-## Contributed components
+## `models/` -- Database schema
 
-The contributed components in Astra all live in the {obj}`astra.contrib` namespace.
-Let's imagine you wanted to add a component called 'Rocket'.
+Each file in `models/` defines one or more [Peewee](http://docs.peewee-orm.com/) ORM classes that map to database tables. The key base classes are:
 
-This component will have some tasks that write results to the database.
-The outputs in the database will need their own database table, `RocketOutput`, so we will need to add a data model for this in `python/astra/database/astradb.py`.
-Let's imagine that Rocket has some *new* method for continuum normalisation, called "Takeoff", which we will add to Astra in a way so that other codes can also use it. To do that, we will add the normalisation code in `python/astra/tools/continuum/takeoff.py`
- (to a new table in the database),
-and imagine this Rocket code has a "new" method for continuum normalisation (called "Takeoff"), which we will add to Astra in a way so that other codes could also use it.
+| File | Purpose |
+|---|---|
+| `base.py` | `BaseModel` -- the root model class that binds every table to the shared database connection. Also contains FITS-serialisation helpers. |
+| `source.py` | `Source` -- an astronomical source (one row per `sdss_id`). |
+| `spectrum.py` | `Spectrum` and `SpectrumMixin` -- the base spectrum table and a mixin that adds `.flux`, `.ivar`, `.wavelength`, `.e_flux`, and `.plot()`. |
+| `pipeline.py` | `PipelineOutputMixin` -- the base class for all pipeline result tables. Adds `task_pk`, `source_pk`, `spectrum_pk`, `v_astra`, timing fields, and `from_spectrum()`. |
+| `apogee.py` | APOGEE spectrum types (`ApogeeCoaddedSpectrumInApStar`, `ApogeeVisitSpectrum`, etc.). |
+| `boss.py` | BOSS spectrum types (`BossVisitSpectrum`). |
+| `mwm.py` | Combined MWM spectrum types (`BossCombinedSpectrum`, `ApogeeCombinedSpectrum`). |
 
-From the [Astra GitHub repository](https://github.com/sdss/astra), the relevant folder and file structure might look something like this:
+Pipeline-specific result models live alongside these (e.g., `corv.py`, `snow_white.py`, `aspcap.py`). Each one extends `PipelineOutputMixin` and declares the output columns for that pipeline.
+
+## `pipelines/` -- Analysis code
+
+Each sub-directory under `pipelines/` contains the code for one analysis pipeline:
 
 ```
-python/
-    astra/
-        contrib/
-            rocket/
-                __init__.py
-                base.py
-                model.py
-                utils.py
-
-        database/
-            astradb.py
-
-        tools/
-            continuum/
-                takeoff.py
+pipelines/
+  apogeenet/       # Neural-network stellar parameters for APOGEE spectra
+  aspcap/          # APOGEE Stellar Parameters and Chemical Abundances Pipeline
+  astronn/         # AstroNN stellar parameters and abundances
+  astronn_dist/    # AstroNN distance estimates
+  best/            # Best-estimate parameter compilation
+  bossnet/         # Neural-network stellar parameters for BOSS spectra
+  clam/            # Classification and labelling
+  corv/            # White-dwarf radial velocities
+  ferre/           # FERRE spectral fitting
+  line_forest/     # Emission/absorption line measurements
+  mdwarftype/      # M-dwarf spectral typing
+  nmf_rectify/     # NMF continuum rectification
+  slam/            # SLAM stellar parameters for BOSS spectra
+  snow_white/      # White-dwarf classification and parameters
+  the_cannon/      # The Cannon data-driven model
+  the_payne/       # The Payne spectral model fitting
 ```
 
-Within the `rocket/` directory, `base.py` is where we will define task instances. We will define anything related to the model in `model.py`, and put utilities in `utils.py`. This is just a guide: the most important things are probably to keep this folder structure, and to put the task instances in `base.py`.
+Each pipeline directory typically contains:
+
+- `__init__.py` -- the main entry point decorated with `@task` (see [Writing a Pipeline](writing-a-pipeline)).
+- Supporting modules for fitting, utilities, model loading, etc.
+
+## `products/` -- Data product generation
+
+Code that generates FITS files for SDSS data releases:
+
+| File | Purpose |
+|---|---|
+| `mwm.py` | Generates per-source `mwmVisit` and `mwmStar` FITS files. |
+| `pipeline.py` / `pipeline_summary.py` | Generates summary tables (e.g., `astraAllStarASPCAP`). |
+| `apogee.py` / `boss.py` | Instrument-specific product helpers. |
+| `mwm_summary.py` | `mwmAllVisit`, `mwmAllStar`, `mwmTargets` summary products. |
+
+## `specutils/` -- Spectral utilities
+
+Reusable routines for spectrum manipulation:
+
+- `continuum/` -- Continuum normalisation methods.
+- `resampling.py` -- Wavelength grid resampling.
+- `lsf.py` -- Line-spread-function convolution.
+- `ndi.py` -- Non-destructive interpolation.
+
+## `cli/` -- Command-line interface
+
+The CLI is built with [Typer](https://typer.tiangolo.com/). The main entry point is `astra.py`, which defines the `astra` command. Key sub-commands:
+
+- `astra run <task> [input_model]` -- Run a pipeline task.
+- `astra srun <task> [input_model]` -- Submit a pipeline task to Slurm.
+- `astra create <product>` -- Generate a data product.
+- `astra migrate` -- Ingest new spectra from the SDSS reduction pipelines.
+- `astra config show|get|set` -- Manage configuration.
+
+There is also a `casload` CLI for bulk-loading catalogues.
+
+## `fields.py` -- Custom Peewee fields
+
+Astra extends Peewee with custom field types:
+
+- `BitField` -- Stores boolean flags as bits in an integer column. Pipelines use this for quality flags (e.g., `result_flags`).
+- `PixelArray` / `ArrayField` -- Virtual fields that store per-pixel data (flux, wavelength) outside the database (typically in FITS files) and load them lazily via accessor classes.
+- `LogLambdaArrayAccessor` -- Generates a wavelength array from CRVAL/CDELT/NAXIS instead of storing it.
+
+## `migrations/` -- Database migrations
+
+Scripts that ingest reduced data products into Astra's database tables (`Source`, `Spectrum`, `ApogeeVisitSpectrum`, `BossVisitSpectrum`, etc.). These are run via `astra migrate`.
+
+## `utils/` -- Utilities
+
+- `__init__.py` -- Logging, path expansion, version helpers, the `Timer` context manager (used by the `@task` decorator to track elapsed time and overhead), and task/model resolution functions.
+- `slurm.py` -- Helpers for submitting Slurm batch jobs via `astra srun`.
+
+## `etc/` -- Default configuration
+
+Contains the default `astra.yml` configuration file that ships with the package. User overrides go in `~/.config/sdss/astra/astra.yml`.

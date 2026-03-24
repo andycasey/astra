@@ -2,29 +2,94 @@
 hide-toc: true
 ---
 
-# A developer's guide to Astra 
+# Developer Guide
 
-The aim of this guide is to provide a comprehensive introduction on how Astra works.
-The expected audience has experience with Python, and falls into one or more of the following categories:
-- intends to add an existing analysis pipeline as a component in Astra;
-- wants to create or update a directed acyclic graph (DAG) for using Astra and Airflow; or
-- intends to contribute to the general Astra source code.
+This guide is for developers who want to contribute to Astra, add a new analysis pipeline, or understand how the codebase works. It assumes familiarity with Python.
 
-This guide starts with the fundamentals of Astra.
-A [task is introduced](tasks) as a reproducible unit of work, with different [parameters](parameters) that might change the expected output. We'll describe how tasks with common overheads are [bundled together](bundles) for efficiency, and how all tasks can be reproduced because the input [data products](data-products) and [summary outputs](outputs) are [saved to a database](database), mostly automatically. This allows us to create summary tables of results, compare outputs from different analysis methods, or code versions.
+## What is Astra?
 
-This general framework is comprehensive enough that the reader should be able to write their own executable task, and use it in Astra. And you could use this for any data analysis purpose: there's no requirement that the tasks need to have anything to do with astronomy. They could use that task to analyse data that is stored locally, with the inputs and summary outputs stored in a local database. You'd just have to write some scripts to create and execute the tasks with some frequency, which you could do through a `cron` job (or similar).
+Astra is the analysis framework for the SDSS-V Milky Way Mapper. It manages spectroscopic analysis pipelines, stores results in a database, and produces data products (FITS files) for data releases. Each pipeline analyzes spectra (APOGEE, BOSS, or combined MWM products) and writes per-spectrum results to a shared database. Apache Airflow orchestrates the pipelines in production.
 
-An individual task represents the smallest unit of work in Astra. Usually you want to use the outputs from one task as inputs to another task, or you want to execute many tasks in a complex graph. In that case, sometimes a simple `cron` job is not enough, and you need a workflow to schedule and execute tasks following some logic. There are many tools that can do this orchestration (e.g., [luigi](#), [airflow](#), [snakemake](#), and others). You can use any of these with Astra. After trying a few others, we [adopted Airflow in SDSS-V](airflow-index).
+## Setting up a development environment
 
+Astra uses [uv](https://docs.astral.sh/uv/) for dependency management. To get started:
+
+```bash
+# Clone the repository
+git clone https://github.com/sdss/astra.git
+cd astra
+
+# Create a virtual environment and install in editable mode with dev dependencies
+uv venv
+source .venv/bin/activate
+uv pip install -e ".[dev]"
+```
+
+### Database configuration
+
+Astra needs a database connection. For local development, the simplest option is to use a SQLite database by setting an environment variable:
+
+```bash
+export ASTRA_DATABASE_PATH="/path/to/astra.db"
+```
+
+Alternatively, create a configuration file at `~/.config/sdss/astra/astra.yml`:
+
+```yaml
+# SQLite (simplest for local development)
+database:
+  path: /path/to/astra.db
+
+# PostgreSQL (used in production)
+# database:
+#   dbname: astra
+#   user: username
+#   host: localhost
+#   port: 5432
+#   schema: astra
+```
+
+For tests, the database is automatically set to an in-memory SQLite instance (`:memory:`), so no configuration is needed to run the test suite.
+
+### Running the CLI
+
+Astra provides a `typer`-based CLI. After installation:
+
+```bash
+astra --help
+astra config show
+```
+
+## Repository layout
+
+```
+astra/
+  src/astra/           # Main source code
+    models/            # Peewee ORM models (database schema)
+    pipelines/         # Analysis pipeline code
+    products/          # FITS data product generation
+    specutils/         # Spectral utilities (continuum, resampling, LSF)
+    cli/               # Command-line interface (typer)
+    migrations/        # Database migration scripts
+    operators/         # Airflow operators
+    etc/               # Default configuration files
+    fields.py          # Custom Peewee field types (BitField, ArrayField, PixelArray)
+    glossary.py        # Standardised field descriptions for data models
+    utils/             # General utilities, logging, Slurm helpers
+  tests/               # Test suite
+  dags/                # Airflow DAG definitions
+  docs/                # Sphinx documentation
+  pyproject.toml       # Project metadata and dependencies
+```
+
+See [Project Structure](structure) for a deeper look at each directory.
 
 ### Contents
 
 ```{toctree}
-tasks
-parameters
-data-products
-outputs
-bundles
+structure
+writing-a-pipeline
 database
+tests
+dags
 ```

@@ -592,13 +592,8 @@ def get_basic_header(
             (" ", s("HDU Descriptions"), None),
             BLANK_CARD,
             ("COMMENT", "HDU 0: Summary information only", None),
-            #("COMMENT", "HDU 1: BOSS spectra", None),
-            #("COMMENT", "HDU 2: APOGEE spectra", None),
-            #])        
-            ("COMMENT", "HDU 1: BOSS spectra taken at Apache Point Observatory"),
-            ("COMMENT", "HDU 2: BOSS spectra taken at Las Campanas Observatory"),
-            ("COMMENT", "HDU 3: APOGEE spectra taken at Apache Point Observatory"),
-            ("COMMENT", "HDU 4: APOGEE spectra taken at Las Campanas Observatory"),
+            ("COMMENT", "HDU 1: BOSS results", None),
+            ("COMMENT", "HDU 2: APOGEE results", None),
         ])
 
     return fits.Header(cards)    

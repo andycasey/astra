@@ -6,11 +6,7 @@
     :template: module.rst
     :recursive:
 
-    astra.base
-    astra.contrib
-    astra.database
-    astra.operators
-    astra.sdss
-    astra.tools
     astra.utils
+    astra.fields
+    astra.glossary
 ```

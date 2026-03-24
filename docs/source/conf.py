@@ -13,7 +13,7 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath("../../"))
+sys.path.insert(0, os.path.abspath("../../src"))
 
 
 # -- Project information -----------------------------------------------------
@@ -49,7 +49,36 @@ autosummary_mock_imports = [
     "astra.database.apogee_drpdb",
     "astra.database.sdss5db",
     "astra.contrib.thecannon",
-    "astra.contrib.thecannon_new"
+    "astra.contrib.thecannon_new",
+]
+
+# Mock imports for heavy dependencies that may not be available on ReadTheDocs
+autodoc_mock_imports = [
+    "numpy",
+    "scipy",
+    "astropy",
+    "h5py",
+    "peewee",
+    "playhouse",
+    "sdsstools",
+    "sdssdb",
+    "healpy",
+    "specutils",
+    "matplotlib",
+    "sklearn",
+    "joblib",
+    "pandas",
+    "airflow",
+    "apache_airflow",
+    "decorator",
+    "tqdm",
+    "fitsio",
+    "dustmaps",
+    "thread",
+    "typer",
+    "click",
+    "yaml",
+    "pyyaml",
 ]
 
 add_module_names = False

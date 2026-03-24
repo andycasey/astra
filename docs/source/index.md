@@ -10,7 +10,7 @@ hide-toc: true
 
 user/install
 user/datamodels
-user/components/index
+user/pipelines/index
 ```
 
 ```{toctree}

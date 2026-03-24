@@ -1,12 +1,5 @@
 # API
 
-```{eval-rst}
-.. autosummary::
-    :toctree: _autosummary
-    :template: module.rst
-    :recursive:
+API documentation will be available once the full package is installable in the documentation build environment.
 
-    astra.utils
-    astra.fields
-    astra.glossary
-```
+For now, please refer to the source code directly.

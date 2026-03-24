@@ -28,67 +28,17 @@ release = "0.3"
 
 extensions = [
     # Sphinx's own extensions
-    "sphinx.ext.autodoc",
     "sphinx.ext.extlinks",
     "sphinx.ext.intersphinx",
-    "sphinx.ext.autosummary",
     "sphinx.ext.mathjax",
     "sphinx.ext.todo",
-    "sphinx.ext.viewcode",
-    # Our custom extension, only meant for Furo's own documentation.
     # External stuff
     "myst_parser",
     "sphinx_copybutton",
     "sphinx_design",
     "sphinx_inline_tabs",
 ]
-autosummary_generate = True
-autosummary_mock_imports = [
-    "astra.database.catalogdb",
-    "astra.database.targetdb",
-    "astra.database.apogee_drpdb",
-    "astra.database.sdss5db",
-    "astra.contrib.thecannon",
-    "astra.contrib.thecannon_new",
-]
-
-# Mock imports for heavy dependencies that may not be available on ReadTheDocs
-autodoc_mock_imports = [
-    "numpy",
-    "scipy",
-    "astropy",
-    "h5py",
-    "peewee",
-    "playhouse",
-    "sdsstools",
-    "sdssdb",
-    "healpy",
-    "specutils",
-    "matplotlib",
-    "sklearn",
-    "joblib",
-    "pandas",
-    "airflow",
-    "apache_airflow",
-    "decorator",
-    "tqdm",
-    "fitsio",
-    "dustmaps",
-    "thread",
-    "typer",
-    "click",
-    "yaml",
-    "pyyaml",
-]
-
 add_module_names = False
-autodoc_default_flags = ["members"]
-autodoc_default_options = {
-    "members": True,
-    "member-order": "bysource",
-    "special-members": "__init__,__call__",
-    'show-inheritance': True,
-}
 templates_path = ["_templates"]
 
 

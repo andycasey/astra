@@ -11,6 +11,7 @@ hide-toc: true
 user/install
 user/datamodels
 user/pipelines/index
+user/glossary
 ```
 
 ```{toctree}

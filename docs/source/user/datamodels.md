@@ -1,143 +1,285 @@
 # Data models
 
-This page describes data models that are frequently given to, or produced by, Astra.
+This page describes the data models used by Astra. These models define how astronomical sources, spectra, pipeline results, and summary products are stored in the database and written to FITS files.
 
-## APOGEE pipeline products
+## Sources
 
-### `apVisit`
+**Model:** `astra.models.source.Source`
 
-An `apVisit` file contains a 1D infrared APOGEE spectrum of a single "visit" of a source, where a visit might include multiple dithered exposures. The wavelengths are in vacuum and in the observed frame: no correction is made based on the relative velocity of the source. 
+The `Source` model represents a single astronomical object. Every spectrum and pipeline result in Astra is linked back to a `Source`. Each source has a unique primary key (`pk`) and carries identifiers, astrometry, photometry, targeting information, and reddening estimates.
 
-These files are produced by the [APOGEE data reduction pipeline](https://github.com/sdss/apogee_drp). 
+### Identifiers
 
-These file types exist in SDSS-IV and in SDSS-V. The keywords needed to identify an `apVisit` file are different between data release 16 (SDSS-IV) and SDSS-V:
-```python
->> from sdss_access import SDSSPath
+- `sdss_id` -- the unique SDSS-V identifier for this source.
+- `sdss4_apogee_id` -- the APOGEE identifier from SDSS-IV (a string like `2M00000+000000`).
+- `gaia_dr2_source_id`, `gaia_dr3_source_id` -- Gaia source identifiers.
+- `tic_v8_id` -- TESS Input Catalog (v8) identifier.
+- `healpix` -- HEALPix index for spatial indexing.
+- `catalogid`, `catalogid21`, `catalogid25`, `catalogid31` -- SDSS-V catalog identifiers from different cross-match versions.
 
->> SDSSPath("dr16").lookup_keys("apVisit")
-   ['field', 'telescope', 'prefix', 'mjd', 'plate', 'fiber', 'apred']
+### Astrometry
 
->> SDSSPath("sdss5").lookup_keys("apVisit")
-   ['field', 'telescope', 'mjd', 'plate', 'fiber', 'apred']
-```
+- `ra`, `dec` -- right ascension and declination (degrees, J2000).
+- `l`, `b` -- Galactic longitude and latitude (degrees).
+- `plx`, `e_plx` -- parallax and its uncertainty (mas), from Gaia.
+- `pmra`, `e_pmra`, `pmde`, `e_pmde` -- proper motions and uncertainties (mas/yr).
+- `gaia_v_rad`, `gaia_e_v_rad` -- radial velocity from Gaia (km/s).
 
-### `apStar`
+### Photometry
 
-An `apStar` file includes infrared APOGEE 1D spectra of a source (usually a star). If a source was observed many times (i.e., has many _visits_) and those spectra were considered useful, then those spectra will be included in the `apStar` file. However, unlike the `apVisit` files, the spectra in the `apStar` files are re-sampled onto a common wavelength array (vacuum) and are redshifted to the source rest frame. 
+The `Source` model stores photometry from several surveys:
 
-The number of useful visit spectra will not always match the number of spectra in the `apStar` file. If there is only one useful visit, then there will be only one spectrum in the `apStar` file. If there are multiple useful visits then these will be stacked together to create a high signal-to-noise ratio spectrum. As of September 2022 there are two methods used to create a stacked spectrum: a pixel-weighting method, and a global-weighting method. For this reason, if there are 2 useful visit spectra then the `apStar` file will contain four spectra: a pixel-weighted stacked spectrum, a global-weighted stacked spectra, and the two visit spectra. The definition of whether a spectrum was considered 'useful' or not depends on a minimum signal-to-noise requirement (>3), it requires that the spectrum was not flagged by the APOGEE data reduction pipeline as being 'bad', and that the radial velocity determination succeeded, among a few other things.
+- **Gaia:** `g_mag`, `bp_mag`, `rp_mag`
+- **2MASS:** `j_mag`, `h_mag`, `k_mag` (with uncertainties `e_j_mag`, etc.)
+- **unWISE:** `w1_mag`, `w2_mag` (with uncertainties), plus raw fluxes `w1_flux`, `w2_flux`
+- **GLIMPSE (Spitzer 4.5 micron):** `mag4_5`
+- **Synthetic photometry from Gaia XP spectra:** Johnson-Kron-Cousins (`u_jkc_mag`, `b_jkc_mag`, etc.), SDSS (`u_sdss_mag`, `g_sdss_mag`, etc.), and Pan-STARRS (`y_ps1_mag`)
 
-These files are produced by the [APOGEE data reduction pipeline](https://github.com/sdss/apogee_drp). 
+### Reddening
 
-These file types exist in SDSS-IV and in SDSS-V. The keywords needed to identify an `apStar` file are different between data release 16 (SDSS-IV) and SDSS-V:
-```python
->> from sdss_access import SDSSPath
+- `ebv`, `e_ebv` -- the adopted E(B-V) reddening and its uncertainty.
+- `ebv_flags` -- bit field indicating the provenance of the adopted E(B-V), which may come from Zhang (2023), Edenhofer (2023), SFD, RJCE (GLIMPSE or AllWISE), or Bayestar (2019).
+- Individual reddening estimates are also stored (e.g., `ebv_zhang_2023`, `ebv_sfd`, `ebv_bayestar_2019`).
 
->> SDSSPath("dr16").lookup_keys("apStar")
-   ['telescope', 'prefix', 'field', 'obj', 'apstar', 'apred']
+### External stellar parameter estimates
 
->> SDSSPath("sdss5").lookup_keys("apStar")
-   ['telescope', 'obj', 'healpix', 'apstar', 'apred']
-```
+- `zgr_teff`, `zgr_logg`, `zgr_fe_h` -- effective temperature, surface gravity, and metallicity from the Gaia XP analysis of Zhang, Green & Rix (2023).
+- `r_med_geo`, `r_med_photogeo` -- geometric and photogeometric distance estimates from Bailer-Jones (EDR3, 2021).
 
-## BOSS pipeline products
+### Observations summary
 
-### `specFull`
+- `n_boss_visits`, `n_apogee_visits` -- number of BOSS and APOGEE visits.
+- `boss_min_mjd`, `boss_max_mjd`, `apogee_min_mjd`, `apogee_max_mjd` -- MJD range of observations.
 
-A `specFull` file includes a 1D optical BOSS spectrum of a source. This spectrum might often be a co-add of multiple exposures of the source during the same night. The wavelengths are not resampled onto a common array, but are given in vacuum and are shifted to the rest frame of the Solar system barycentre. 
+### Targeting flags
 
-These files are produced by the [BOSS data reduction pipeline](https://github.com/sdss/idlspec2d).
-
-These files are the closest optical analogue of `apVisit` files for APOGEE spectra. There are no data products produced by the BOSS data reduction pipeline that stack spectra of the same source taken over multiple nights (e.g., if `specFull` is the optical analogue of `apVisit`, then there is no equivalent analogue of `apStar`).
-
-These files only exist in SDSS-V. The keywords needed to identify a `specFull` file are:
-```python
->> from sdss_access import SDSSPath
-
->> SDSSPath("sdss5").lookup_keys("specFull")
-   ['isplate', 'mjd', 'catalogid', 'fieldid', 'run2d']
-```
-
-## Astra products
-
-### Observed data products
-
-Astra produces some data products that only contain observations (`mwmVisit` and `mwmStar`) in order to create high signal-to-noise stacked BOSS spectra (which are not produced by the BOSS data reduction pipeline), and to streamline differences in the data products produced by the BOSS and APOGEE data reduction pipelines.
-
-#### `mwmVisit`
-
-The `mwmVisit` file contains **all spectra** for a Milky Way Mapper (MWM) source, from all telescope/instrument combinations. It has 5 header data units (HDUs):
-
-0. A primary HDU containing information about the source (e.g., photometry, astrometry).
-1. All BOSS spectra from Apache Point Observatory
-2. All BOSS spectra from Las Campanas Observatory
-3. All APOGEE spectra from Apache Point Observatory
-4. All APOGEE spectra from Las Campanas Observatory
-
-The `mwmStar` files are similar in form, but they contain only a single stacked spectrum per HDU instead of individual visits. All `mwmVisit` and `mwmStar` spectra are redshifted to the source rest frame, and resampled onto a common wavelength array.
-
-Creating a `mwmVisit` data product requires `apVisit` products and `specFull` products as inputs. However, the `mwmVisit` files differ slightly to `apVisit` and `specFull` files in a few important ways:
-- The wavelengths of all `mwmVisit` spectra are in the source rest frame. The `apStar` spectra were all in the source rest frame, but `apVisit` spectra are in the observed frame, and `specFull` are in the Solar system barycentric rest frame.
-- The `mwmVisit` spectra are re-sampled onto a common wavelength array. The `apStar` spectra were resampled onto a common wavelength array, and the `mwmVisit` files use that same sampling. However, the `apVisit` spectra are not resampled, and neither are the `specFull` files.
-- If an `apVisit` spectrum was deemed 'unreliable' then it would not be used to create the stacked spectra in the `apStar` file, and the `apVisit` spectrum would not appear as a row in the `apStar` file. In this case the spectrum **does exist** in the `mwmVisit` file, and an accompanying boolean column called `IN_STACK` describes whether the spectrum was used to create a stacked spectrum in the `mwmStar` file.
-
-These differences mean that `mwmVisit` files include **all the data** that SDSS-V collects for a source, resampled onto a wavelength array that is ready for scientific analysis. And even if some spectra were not considered reliable (for whatever reason), those spectra are included for the user to examine.
-
-The `mwmVisit` files can be given to nearly every component in Astra. `mwmVisit` files only exist in SDSS-V. The keywords required to identify a `mwmVisit` file are:
-
-- `catalogid`: the SDSS-V catalog identifier
-- `apred`: the APOGEE data reduction pipeline version used to create the input `apVisit` files
-- `run2d`: the BOSS data reduction pipeline used to create the input `specFull` files
-- `astra_version`: the version of Astra that created the file
-
-```{Note}
-**Spectroscopic binaries**
-
-In future the `mwmVisit` and `mwmStar` products will have an optional keyword `component` to describe a stellar component that has been disentangled from the existing spectra. For example, in the case of a spectroscopic binary, the individual spectra of the two stars can often be disentangled by using multiple visits. In these cases there will be additional data products produced by a component of Astra. If the `catalogid` is 123456789 then the `mwmVisit` filenames will be:
-
-1. `mwmVisit-...-123456789.fits`: the original spectra without any disentangling (e.g., `component=None` or `component=''`)
-2. `mwmVisit-...-123456789A.fits`: the disentangled spectra of the primary component, A (e.g., `component='A'`)
-3. `mwmVisit-...-123456789B.fits`: the disentangled spectra of the secondary component, B (e.g., `component='B'`)
-
-These data products can be processed by Astra components as if they were normal observations, allowing us to see what happens when we feed in known spectroscopic binary spectra (example 1), and obtain stellar parameters of the individual (disentangled) components (examples 2 and 3).
-
-The original spectra without disentangling will always be available, because disentangling is a model-dependent process. This note also applies to `mwmStar` spectra.
-```
-
-#### `mwmStar`
-
-A `mwmStar` file contains **all stacked spectra** for a MWM source. This includes a stacked optical BOSS spectrum, and a stacked infrared spectrum from the APOGEE instrument at Apache Point Observatory, and a stacked infrared spectrum from the APOGEE instrument on the du Pont telescope at Las Campanas Observatory. Currently we do not stack spectra from different APOGEE instruments because of their different line spread function profiles. Stacked spectra from each telescope/instrument combination are stored in their own HDU (see `mwmVisit` HDU definition).
-
-The `mwmVisit` and `mwmStar` files are created simultaneously so that they will always remain synchronised. Any spectra in the `mwmVisit` file that has `IN_STACK` marked as `True` contributed to the stacked spectrum in the `mwmStar` file. The `mwmVisit` and `mwmStar` files have the same (resampled) wavelength array, which is in vacuum and in the source rest frame. The `mwmStar` spectra are ready for scientific analysis, **and represent our current "best spectrum" for a source**. 
-
-The `mwmStar` files can be given to nearly every component in Astra. `mwmStar` files exist only in SDSS-V. The keywords required to identify a `mwmStar` file are the same required for a `mwmVisit` file:
-
-- `catalogid`: the SDSS-V catalog identifier
-- `apred`: the APOGEE data reduction pipeline version used to create the input `apVisit` files
-- `run2d`: the BOSS data reduction pipeline used to create the input `specFull` files
-- `astra_version`: the version of Astra that created the file
-
-### Component-level products
-
-Some analysis components in Astra only produce estimates of stellar properties, without any accompanying model spectra. Other components produce both model spectra and stellar properties. The `astraVisit` and `astraStar` files store best-fitting model spectra (from a single component) for a given source. These contain the model spectra that are companions to the `mwmVisit` and `mwmStar` observed data products.
-
-#### `astraVisit`
-
-Documentation TBD. Very similar to `mwmVisit`, but contains best-fitting model spectrum from an analysis pipeline.
-
-#### `astraStar`
-
-Documentation TBD. Very similar to `mwmStar`, but contains best-fitting model spectrum from an analysis pipeline.
-
-### Summary products
-
-#### `astraAllStar`
-
-Documentation TBD. Contains stellar parameter estimates from one or many pipelines. There could/should be two types of files:
-- per-pipeline: results for all stars (from `mwmStar` high S/N spectrum) from a given pipeline
-- per-carton: results for all stars (from `mwmStar` high S/N spectrum) in a carton, split between pipelines in a way chosen by carton owners, with separate HDUs for each pipeline used, and no stars with results from multiple pipelines (`astraAllStarBest`?)
+The `Source` model carries extensive targeting flags from both SDSS-IV (`sdss4_apogee_target1_flags`, `sdss4_apogee2_target1_flags`, etc.) and SDSS-V (`sdss5_target_flags`). These can be queried with helper methods such as `assigned_to_carton_label()` and `assigned_to_program()`.
 
 
-#### `astraAllVisit`
+## Spectra
 
-Documentation TBD. Contains stellar parameter estimates from one or many pipelines. 
+### APOGEE spectra
+
+**Module:** `astra.models.apogee`
+
+APOGEE spectra are infrared spectra (H-band, ~1.5--1.7 micron) with 8575 pixels on a log-lambda wavelength grid. There are three APOGEE spectrum models in Astra, each corresponding to a different stage of processing.
+
+#### ApogeeVisitSpectrum
+
+An individual visit spectrum from the APOGEE data reduction pipeline, stored in an `apVisit` file. A "visit" is a single observation of a source (possibly combining multiple dithered exposures within the same night).
+
+Key fields:
+
+- `spectrum_pk` -- unique spectrum identifier used to link to pipeline results.
+- `source` -- foreign key to the `Source` this spectrum belongs to.
+- `release` -- data release (e.g., `"sdss5"` or `"dr17"`).
+- `apred` -- APOGEE reduction pipeline version.
+- `telescope` -- telescope used (e.g., `"apo25m"`, `"lco25m"`, `"apo1m"`).
+- `plate`, `field`, `fiber`, `mjd` -- observation identifiers.
+- `snr` -- signal-to-noise ratio.
+- `v_rad` -- absolute radial velocity (km/s).
+- `v_rel`, `e_v_rel` -- relative radial velocity and its uncertainty from Doppler fitting.
+- `doppler_teff`, `doppler_logg`, `doppler_fe_h` -- initial stellar parameter estimates from the Doppler RV code.
+- `spectrum_flags` -- bit field encoding quality warnings (bad pixels, bright neighbors, persistence, RV failures, etc.).
+- `wavelength`, `flux`, `ivar`, `pixel_flags` -- spectral data arrays. Wavelengths are in vacuum, in the observed frame (not rest frame).
+
+#### ApogeeVisitSpectrumInApStar
+
+A visit spectrum as stored within an `apStar` file. Unlike the raw `apVisit`, these spectra have been resampled onto a common log-lambda wavelength grid and shifted to the source rest frame.
+
+Key fields are similar to `ApogeeVisitSpectrum`, with the addition of `drp_spectrum_pk` which links back to the original `ApogeeVisitSpectrum`.
+
+#### ApogeeCoaddedSpectrumInApStar
+
+A co-added (stacked) APOGEE spectrum from an `apStar` file, created by combining all good visit spectra for a source. This represents the highest signal-to-noise APOGEE spectrum available for a given source.
+
+Key fields:
+
+- `star_pk` -- APOGEE DRP star primary key.
+- `n_entries`, `n_visits`, `n_good_visits`, `n_good_rvs` -- number of visits and quality counts.
+- `min_mjd`, `max_mjd` -- MJD range of the observations that went into the stack.
+- `snr` -- signal-to-noise ratio of the co-added spectrum.
+- `v_rad`, `e_v_rad`, `std_v_rad` -- mean radial velocity, its uncertainty, and the scatter across visits.
+- `doppler_teff`, `doppler_logg`, `doppler_fe_h` -- stellar parameters from the Doppler RV code.
+- `wavelength`, `flux`, `ivar`, `pixel_flags` -- spectral data on the common APOGEE log-lambda grid.
+
+### BOSS spectra
+
+**Module:** `astra.models.boss`
+
+#### BossVisitSpectrum
+
+An optical BOSS spectrum from a `specFull` file. A BOSS "visit" is defined as all exposures of a source taken on the same MJD. The wavelengths are in vacuum and shifted to the Solar system barycentric rest frame (not the source rest frame).
+
+Key fields:
+
+- `spectrum_pk` -- unique spectrum identifier.
+- `source` -- foreign key to the `Source`.
+- `release`, `run2d` -- data release and BOSS reduction pipeline version.
+- `fieldid`, `mjd`, `catalogid` -- observation identifiers.
+- `telescope` -- telescope used (e.g., `"apo25m"`, `"lco25m"`).
+- `snr` -- signal-to-noise ratio.
+- `n_exp`, `exptime` -- number of exposures and total exposure time.
+- `seeing`, `airmass` -- observing conditions.
+- `xcsao_v_rad`, `xcsao_e_v_rad` -- radial velocity from the XCSAO cross-correlation method.
+- `xcsao_teff`, `xcsao_logg`, `xcsao_fe_h` -- initial stellar parameter estimates from XCSAO.
+- `zwarning_flags` -- BOSS DRP warning flags (sky fiber, low coverage, unplugged, etc.).
+- `wavelength`, `flux`, `ivar`, `pixel_flags` -- spectral data arrays.
+
+There is no BOSS equivalent of `apStar` in the upstream BOSS pipeline -- the BOSS DRP does not stack spectra across multiple nights. Astra fills this gap with the `BossCombinedSpectrum` model (see below).
+
+### MWM spectra
+
+**Module:** `astra.models.mwm`
+
+The MWM (Milky Way Mapper) spectrum models unify APOGEE and BOSS spectra into a common framework. They resample all spectra onto standardized wavelength grids in the source rest frame, making them ready for scientific analysis.
+
+#### BossRestFrameVisitSpectrum
+
+A BOSS visit spectrum that has been resampled onto a common log-lambda wavelength grid (4648 pixels, starting at log10(lambda) = 3.5523 with step 1e-4) and shifted to the source rest frame. Stored in `mwmVisit` files.
+
+Key fields:
+
+- `drp_spectrum_pk` -- link to the original `BossVisitSpectrum`.
+- `sdss_id` -- SDSS-V unique identifier.
+- `in_stack` -- boolean indicating whether this visit was used to create the combined spectrum.
+- `snr` -- signal-to-noise ratio.
+- `xcsao_v_rad`, `xcsao_teff`, `xcsao_logg`, `xcsao_fe_h` -- cross-correlation RV and stellar parameters.
+- `continuum`, `nmf_rchi2`, `nmf_flags` -- NMF continuum model and quality indicators.
+- `wavelength`, `flux`, `ivar`, `pixel_flags` -- spectral data in the source rest frame.
+
+#### BossCombinedSpectrum
+
+A co-added BOSS spectrum created by stacking all good rest-frame visit spectra for a source. This fills the gap left by the BOSS DRP, which does not produce stacked spectra. Stored in `mwmStar` files.
+
+Key fields:
+
+- `sdss_id` -- SDSS-V unique identifier.
+- `telescope` -- telescope used.
+- `n_visits`, `n_good_visits`, `n_good_rvs` -- visit counts.
+- `min_mjd`, `max_mjd` -- MJD range of contributing visits.
+- `v_rad`, `e_v_rad`, `std_v_rad` -- mean radial velocity and scatter.
+- `snr` -- signal-to-noise ratio of the co-added spectrum.
+- `continuum`, `nmf_rectified_model_flux`, `nmf_rchi2` -- NMF continuum model products.
+- `wavelength`, `flux`, `ivar`, `pixel_flags` -- co-added spectral data.
+
+#### ApogeeCombinedSpectrum
+
+A co-added APOGEE spectrum in the MWM framework. Similar in structure to `BossCombinedSpectrum` but for APOGEE data, using the APOGEE log-lambda grid (8575 pixels, starting at log10(lambda) = 4.179 with step 6e-6). Stored in `mwmStar` files.
+
+Key fields:
+
+- `sdss_id`, `apred`, `obj`, `telescope` -- identifiers.
+- `n_entries`, `n_visits`, `n_good_visits`, `n_good_rvs` -- visit counts.
+- `v_rad`, `e_v_rad`, `std_v_rad` -- mean radial velocity and scatter.
+- `doppler_teff`, `doppler_logg`, `doppler_fe_h` -- Doppler-derived stellar parameters.
+- `snr`, `mean_fiber`, `std_fiber` -- summary statistics.
+- `continuum`, `nmf_rectified_model_flux`, `nmf_rchi2` -- NMF continuum model products.
+- `wavelength`, `flux`, `ivar`, `pixel_flags` -- co-added spectral data.
+
+#### ApogeeRestFrameVisitSpectrum
+
+An APOGEE visit spectrum resampled onto the common APOGEE log-lambda grid and shifted to the source rest frame. The APOGEE analogue of `BossRestFrameVisitSpectrum`. Stored in `mwmVisit` files.
+
+
+## Pipeline results
+
+**Module:** `astra.models.pipeline`
+
+All analysis pipeline output models inherit from `PipelineOutputMixin`. This mixin provides a standardized set of metadata fields that every pipeline result carries:
+
+- `task_pk` -- auto-incrementing primary key for the pipeline task.
+- `source_pk` -- foreign key linking to the `Source`.
+- `spectrum_pk` -- foreign key linking to the `Spectrum` that was analyzed.
+- `v_astra` -- the Astra version (as an integer) that produced the result.
+- `created`, `modified` -- timestamps.
+- `t_elapsed`, `t_overhead` -- execution time and overhead (seconds).
+- `tag` -- an optional text tag for organizing results.
+
+A uniqueness constraint ensures that each spectrum is analyzed at most once per major.minor Astra version: `UNIQUE (spectrum_pk, v_astra_major_minor)`.
+
+Individual pipeline models (e.g., ASPCAP, The Cannon, Snow White) extend `PipelineOutputMixin` with their own result fields (stellar parameters, abundances, flags, etc.). The `from_spectrum()` class method provides a convenience for creating a result record from a spectrum object. See the individual pipeline documentation pages for details on specific pipeline output models.
+
+
+## Summary products
+
+**Module:** `astra.products.pipeline_summary`
+
+Summary products are FITS files that collect pipeline results across all sources into convenient catalog tables. There are two main types:
+
+### astraAllStar files
+
+Created by `create_all_star_product()`, these files contain results from a given pipeline run on co-added (star-level) spectra. The FITS structure is:
+
+| HDU | Contents |
+|-----|----------|
+| 0 | Primary HDU with metadata header (pipeline name, Astra version, HDU descriptions) |
+| 1 | BOSS results -- one row per source with a co-added BOSS spectrum analyzed by the pipeline, joined with `Source` and `BossCombinedSpectrum` fields |
+| 2 | APOGEE results -- one row per source with a co-added APOGEE spectrum analyzed by the pipeline, joined with `Source` and `ApogeeCoaddedSpectrumInApStar` fields |
+
+Each row contains the source-level information (identifiers, astrometry, photometry), the spectrum-level metadata (SNR, radial velocities), and all pipeline output fields (stellar parameters, abundances, flags). If a pipeline defines `flag_warn` and `flag_bad` properties, these are included as boolean columns.
+
+### astraAllVisit files
+
+Created by `create_all_visit_product()`, these files have the same HDU structure as `astraAllStar` but contain per-visit results instead of per-star results:
+
+| HDU | Contents |
+|-----|----------|
+| 0 | Primary HDU with metadata header |
+| 1 | BOSS visit-level results (using `BossVisitSpectrum`) |
+| 2 | APOGEE visit-level results (using `ApogeeVisitSpectrumInApStar`) |
+
+### astraBest files
+
+Created by `create_astra_best_product()`, these files contain the "best" result per source across all pipelines. The HDU structure is simpler: a primary HDU and a single binary table extension with one row per source.
+
+File naming follows the pattern `astraAllStar<Pipeline>-<version>.fits` (or `astraAllVisit<Pipeline>-<version>.fits`, or `astraFrankenstein-<version>.fits` for the best product), and files are optionally gzip-compressed.
+
+
+## MWM products
+
+**Module:** `astra.models.mwm`
+
+MWM (Milky Way Mapper) data products combine all observations of a source into unified FITS files with a standardized structure. All spectra are resampled onto common wavelength grids and shifted to the source rest frame.
+
+### mwmVisit
+
+An `mwmVisit` file contains all visit spectra for a source, organized by telescope and instrument. The FITS structure has 5 HDUs:
+
+| HDU | Contents |
+|-----|----------|
+| 0 | Primary HDU with source information (identifiers, photometry, astrometry) |
+| 1 | All BOSS spectra from Apache Point Observatory |
+| 2 | All BOSS spectra from Las Campanas Observatory |
+| 3 | All APOGEE spectra from Apache Point Observatory |
+| 4 | All APOGEE spectra from Las Campanas Observatory |
+
+Key properties of `mwmVisit` spectra:
+
+- All wavelengths are in **vacuum** and in the **source rest frame** (unlike `apVisit` which is in the observed frame, and `specFull` which is in the barycentric frame).
+- All spectra are **resampled onto common wavelength grids** (BOSS: 4648 pixels; APOGEE: 8575 pixels).
+- Spectra deemed unreliable are still included (unlike `apStar`), with an `in_stack` boolean column indicating whether each spectrum was used for the co-added product.
+
+The file path follows the pattern: `$MWM_ASTRA/<v_astra>/spectra/visit/<sdss_id_groups>/mwmVisit-<v_astra>-<sdss_id>.fits`
+
+The models that populate these HDUs are `BossRestFrameVisitSpectrum` (HDUs 1--2) and `ApogeeRestFrameVisitSpectrum` (HDUs 3--4).
+
+### mwmStar
+
+An `mwmStar` file contains the co-added spectra for a source, with one stacked spectrum per telescope/instrument combination. The HDU layout mirrors `mwmVisit`.
+
+These represent the **best available spectrum** for a source and are the primary input to most Astra analysis pipelines.
+
+The file path follows the pattern: `$MWM_ASTRA/<v_astra>/spectra/star/<sdss_id_groups>/mwmStar-<v_astra>-<sdss_id>.fits`
+
+The models that populate these HDUs are `BossCombinedSpectrum` (HDUs 1--2) and `ApogeeCombinedSpectrum` (HDUs 3--4).
+
+### MWMSpectrumProductStatus
+
+This model tracks whether MWM spectrum products have been created for a given source. Its `flags` bit field records the processing status:
+
+- `flag_skipped_because_no_sdss_id` -- source was skipped because it has no SDSS ID.
+- `flag_skipped_because_not_stellar_like` -- source was skipped because it is not stellar-like.
+- `flag_attempted_but_exception` -- an exception occurred during processing.
+- `flag_created_mwm_visit` -- an `mwmVisit` file was successfully created.
+- `flag_created_mwm_star` -- an `mwmStar` file was successfully created.

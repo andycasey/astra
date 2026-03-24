@@ -12,7 +12,7 @@ Installation
 
 I recommend you use `uv` to create an environment for Astra. Download the repository and install from source:
 ```
-git clone git@github.com:sdss/astra.git
+git clone git@github.com:andycasey/astra.git
 cd astra
 uv venv
 source .venv/bin/activate

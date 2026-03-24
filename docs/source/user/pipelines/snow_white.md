@@ -33,7 +33,7 @@ them into a pre-trained random forest classifier. The feature extraction
 6. All features are concatenated into a single feature vector.
 
 The random forest outputs class probabilities for 24 white dwarf subtypes (see
-[Output fields](#output-fields) below). The classification is assigned as:
+Output fields below). The classification is assigned as:
 
 - The most probable class, if its probability is at least 0.5.
 - A dual classification (e.g., `DA/DB`) if the second-most-probable class has a

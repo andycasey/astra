@@ -9,12 +9,12 @@ def test_task_query_builder_with_group_by():
     from astra.models.source import Source
     from astra.models.spectrum import Spectrum
     from astra.models.apogee import ApogeeVisitSpectrum
-    from astra.models.pipeline import PipelineOutputModel
+    from astra.models.pipeline import PipelineOutputMixin
     from astra.fields import BooleanField
     from datetime import datetime
     from typing import Iterable
 
-    class ApogeeVisitState(PipelineOutputModel):
+    class ApogeeVisitState(PipelineOutputMixin):
         used = BooleanField()
 
     models = (Source, Spectrum, ApogeeVisitSpectrum, ApogeeVisitState)

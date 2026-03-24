@@ -8,10 +8,10 @@ def test_pipeline_unique_constraint_spectrum_major_minor():
     from astra import __version__
     from astra.models.source import Source
     from astra.models.spectrum import Spectrum
-    from astra.models.pipeline import PipelineOutputModel
+    from astra.models.pipeline import PipelineOutputMixin
     from astra.utils import version_string_to_integer, version_integer_to_string
 
-    class Dummy(PipelineOutputModel):
+    class Dummy(PipelineOutputMixin):
         pass
     
     for model in (Source, Spectrum, Dummy):        
@@ -42,12 +42,12 @@ def test_pipeline_replace_on_conflict():
     from astra.models.apogee import ApogeeVisitSpectrum
     from astra.models.source import Source
     from astra.models.spectrum import Spectrum
-    from astra.models.pipeline import PipelineOutputModel
+    from astra.models.pipeline import PipelineOutputMixin
     from astra.utils import version_string_to_integer, version_integer_to_string
     from typing import Iterable
     from time import sleep
 
-    class ThisDummy(PipelineOutputModel):
+    class ThisDummy(PipelineOutputMixin):
         number = IntegerField()
 
     

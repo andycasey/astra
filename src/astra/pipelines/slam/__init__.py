@@ -1,0 +1,290 @@
+__slam_version__ = "1.2019.0109.4"
+
+# === Compatibility fixes for loading pickled models ===
+# These must be at module level so they're applied when worker processes import this module
+import sys
+
+# Sklearn compatibility: _PredictScorer was renamed to _Scorer in sklearn >= 1.0
+import sklearn.metrics._scorer as _scorer_module
+if not hasattr(_scorer_module, '_PredictScorer'):
+    _scorer_module._PredictScorer = _scorer_module._Scorer
+
+# === End sklearn compatibility fix ===
+
+from .slam3 import Slam3 as SlamCode
+
+# Module alias: the pickled model was created when 'slam' was a top-level module
+# Register this module (astra.pipelines.slam) as 'slam' for backwards compatibility
+# This must be done AFTER imports to avoid circular import issues
+from . import slam3 as _slam3_module
+from . import standardization as _standardization_module
+sys.modules['slam'] = sys.modules[__name__]
+sys.modules['slam.slam3'] = _slam3_module
+sys.modules['slam.standardization'] = _standardization_module
+
+from .laspec.convolution import conv_spec, fwhm2resolution
+from .laspec.qconv import conv_spec_Gaussian
+from .laspec.normalization import normalize_spectrum, normalize_spectra_block
+from .laspec.binning import rebin
+
+import numpy as np
+from tqdm import tqdm
+from joblib import load
+from peewee import JOIN, fn, ModelSelect
+from astra import task, __version__, log
+from astra.utils import expand_path
+from astra.models import BossCombinedSpectrum
+from astra.models.slam import Slam
+from astropy.table import Table
+from typing import Iterable, Optional
+from astra.models import Source
+
+
+@task
+def slam_filter(spectra: Iterable[BossCombinedSpectrum], **kwargs) -> Iterable[Slam]:
+    for spectrum in spectra:
+
+        source = spectrum.source
+
+        # Check if spectrum passes selection criteria (from Zach Way, mwm-astra 413)
+        passes_magnitude_cut = (
+            source.g_mag is not None
+            and source.rp_mag is not None
+            and source.plx is not None
+            and source.plx > 0
+            and (source.g_mag - source.rp_mag) > 0.56
+            and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
+        )
+        passes_program_cut = (
+            ("mwm_yso" in spectrum.source.sdss5_cartons["program"])
+        or  ("mwm_snc" in spectrum.source.sdss5_cartons["program"])
+        )
+        if not (passes_magnitude_cut or passes_program_cut):
+            yield Slam.from_spectrum(
+                spectrum,
+                flag_not_magnitude_cut=not passes_magnitude_cut,
+                flag_not_carton_match=not passes_program_cut
+            )
+
+
+#  According to the Bible, we’re roughly dealing with an absolute magnitude range M_G in [7.57, 13.35] for M dwarfs between 4000 and 3000 K. It might be worth including this cut when training/running the SLAM
+@task
+def slam(
+    spectra: Iterable[BossCombinedSpectrum],
+    page=None,
+    limit=None,
+    n_jobs=128,
+    **kwargs
+) -> Iterable[Slam]:
+
+    wave_interp = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/dM_train_wave_standard.csv"))['wave']
+    dump_path = expand_path("$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump")
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning, message='.*unpickle.*')
+        Pre = load(dump_path)
+
+    flux_boss = []
+    ivar_boss = []
+    used_spectra = []
+    for spectrum in tqdm(spectra, desc="Collecting"):
+
+        source = spectrum.source
+
+        # Check if spectrum passes selection criteria (from Zach Way, mwm-astra 413)
+        passes_magnitude_cut = (
+            source.g_mag is not None
+            and source.rp_mag is not None
+            and source.plx is not None
+            and source.plx > 0
+            and (source.g_mag - source.rp_mag) > 0.56
+            and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
+        )
+        passes_program_cut = (
+            ("mwm_yso" in spectrum.source.sdss5_cartons["program"])
+        or  ("mwm_snc" in spectrum.source.sdss5_cartons["program"])
+        )
+        if not (passes_magnitude_cut or passes_program_cut):
+            yield Slam.from_spectrum(
+                spectrum,
+                flag_not_magnitude_cut=not passes_magnitude_cut,
+                flag_not_carton_match=not passes_program_cut
+            )
+            continue
+
+        # only redshift if it is a visit spectrum (not a stack)
+        try:
+            if isinstance(spectrum, BossCombinedSpectrum):
+                wave = spectrum.wavelength
+            else:
+                wave = spectrum.wavelength / (1 + spectrum.xcsao_v_rad / 299792.458)
+            flux_n, invar_n = rebin(
+                wave,
+                flux=spectrum.flux,
+                flux_err=spectrum.e_flux,
+                wave_new=wave_interp
+            )
+            flux_boss.append(flux_n)
+            ivar_boss.append(invar_n)
+        except Exception:
+            log.exception(f"Failed to rebin spectrum {spectrum.spectrum_pk}")
+        else:
+            used_spectra.append(spectrum)
+
+    flux_boss = np.array(flux_boss)
+    ivar_boss = np.array(ivar_boss)
+
+    print("normalizing spectra block")
+    flux_norm, flux_cont = normalize_spectra_block(
+        wave_interp, flux_boss,
+        (6001.755, 8957.321),
+        10.,
+        p=(1E-8, 1E-7),
+        #ivar_block=ivar_boss, # Dan doesn't use this, but there is an option for it.
+        q=0.7, eps=1E-19, rsv_frac=2., n_jobs=n_jobs, verbose=5
+    )
+    flux_norm[flux_norm>2.] = 1
+    flux_norm[flux_norm<0] = 0
+    ivars_norm = (ivar_boss * flux_cont**2)
+
+    log.info("Predicting labels (first pass)")
+    Xinit = Pre.predict_labels_quick(flux_norm, ivars_norm, n_jobs=n_jobs, verbose=5)
+
+    SEP_1_LENGTH = len(flux_norm)
+
+    log.info("Predicting labels")
+    Rpred = Pre.predict_labels_multi(Xinit[0:SEP_1_LENGTH], flux_norm[0:SEP_1_LENGTH], ivars_norm[0:SEP_1_LENGTH],n_jobs=n_jobs,verbose=5)
+    Xpred = np.array([_["x"] for _ in Rpred])
+    Xpred_err = np.array([np.diag(_["pcov"]) for _ in Rpred])
+
+    #feh_niu,feh,alpha_m,teff,logg=(Xpred[:,_] for _ in range(5))
+    #feh_niu_err,feh_err,alpha_m_err,teff_err,logg_err=(Xpred_err[:,_] for _ in range(5))
+
+    for i, spectrum in enumerate(used_spectra):
+        kwds = dict(source_pk=spectrum.source_pk, spectrum_pk=spectrum.spectrum_pk)
+        kwds.update(
+            fe_h_niu=Xpred[i, 0],
+            e_fe_h_niu=Xpred_err[i, 0],
+            fe_h=Xpred[i, 1],
+            e_fe_h=Xpred_err[i, 1],
+            alpha_fe=Xpred[i, 2],
+            e_alpha_fe=Xpred_err[i, 2],
+            teff=Xpred[i, 3],
+            e_teff=Xpred_err[i, 3],
+            logg=Xpred[i, 4],
+            e_logg=Xpred_err[i, 4],
+
+            initial_fe_h_niu=Xinit[i, 0],
+            initial_fe_h=Xinit[i, 1],
+            initial_alpha_fe=Xinit[i, 2],
+            initial_teff=Xinit[i, 3],
+            initial_logg=Xinit[i, 4],
+            status=Rpred[i]["status"],
+            success=Rpred[i]["success"],
+            optimality=Rpred[i]["optimality"],
+            chi2=np.nan,
+            rchi2=np.nan
+        )
+        kwds.update(
+            flag_teff_outside_bounds=(kwds["teff"] < 2800) or (kwds["teff"] > 4500),
+            flag_fe_h_outside_bounds=(kwds["fe_h"] < -1) or (kwds["fe_h"] > 0.5),
+            flag_bad_optimizer_status=(kwds["status"] > 0 and kwds["status"] != 2) | (kwds["status"] < 0),
+        )
+        yield Slam(**kwds)
+
+
+
+if __name__ == "__main__":
+
+    from astra.models import Source, ASPCAP, BossVisitSpectrum, Slam, BossCombinedSpectrum
+    '''
+    spectra = list(
+        BossVisitSpectrum
+        .select()
+        .join(Source)
+        .join(ASPCAP)
+        .switch(BossVisitSpectrum)
+        .join(Slam, on=(BossVisitSpectrum.source_pk == Slam.source_pk))
+        .where(
+            (BossVisitSpectrum.run2d == "v6_1_3")
+        &   (ASPCAP.flag_as_m_dwarf_for_calibration)
+        &   (ASPCAP.v_astra == "0.6.0")
+        &   (Slam.v_astra == "0.6.0")
+        )
+
+        .limit(10)
+    )
+
+    spectra = list(
+        BossCombinedSpectrum
+        .select()
+        .join(Slam, on=(BossCombinedSpectrum.spectrum_pk == Slam.spectrum_pk))
+        .where(Slam.v_astra == "0.6.0")
+        .limit(100)
+    )
+    '''
+    from astropy.table import Table
+    from astra.utils import expand_path
+    t = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/SLAM_test_astra_0.6.0.fits"))
+
+    spectra = list(
+        BossCombinedSpectrum
+        .select()
+        .where(BossCombinedSpectrum.spectrum_pk.in_(list(t["spectrum_pk"])))
+    )
+
+
+    from astra.pipelines.slam import slam
+    results = list(slam(spectra))
+
+    # match up to the rows in the table
+    import numpy as np
+    spectrum_pks = np.array([r.spectrum_pk for r in results])
+
+    t.sort("spectrum_pk")
+    t_spectrum_pks = np.array(t["spectrum_pk"])
+
+    indices = np.array([t_spectrum_pks.searchsorted(s) for s in spectrum_pks])
+    t = t[indices]
+
+    assert np.all(np.array(t["spectrum_pk"]) == spectrum_pks)
+
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    label_names = [
+        ("teff_pre", "teff", "initial_teff"),
+        ("logg_pre", "logg", "initial_logg"),
+        ("feh_niu_pre", "fe_h_niu", "initial_fe_h_niu"),
+        ("alph_m_pre", "alpha_fe", "initial_alpha_fe")
+    ]
+    vrad = [getattr(r, "xcsao_v_rad") for r in spectra]
+
+    for i, ax in enumerate(axes.flat):
+        xlabel, ylabel, zlabel = label_names[i]
+        x = t[xlabel]
+        y = [getattr(r, ylabel) for r in results]
+        z = [getattr(r, zlabel) for r in results]
+
+        scat = ax.scatter(x, y, c=vrad)
+        plt.colorbar(scat, ax=ax)
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        limits = np.array([ax.get_xlim(), ax.get_ylim()])
+        limits = (np.min(limits), np.max(limits))
+        ax.plot(limits, limits, c="k", ls="--")
+        ax.set_xlim(limits)
+        ax.set_ylim(limits)
+
+
+
+    raise a
+
+
+    before = list(Slam.select().where(Slam.v_astra == "0.6.0").where(Slam.spectrum_pk.in_([s.spectrum_pk for s in spectra])))
+    after = list(slam(spectra))
+
+    index = np.argsort([s.spectrum_pk for s in spectra])
+    before_sorted = [before[i] for i in index]

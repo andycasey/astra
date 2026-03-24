@@ -1,0 +1,70 @@
+[project]
+name = "astra"
+version = "0.8.0" 
+readme = "README.md"
+license = "GPL-3.0-or-later"
+description = "Analysis framework for SDSS-V / MWM." 
+keywords = ["astronomy software"]
+authors = [
+  {name = "Andy Casey", email = "andrew.casey@monash.edu"},
+]
+maintainers = [
+  {name = "Andy Casey", email = "andrew.casey@monash.edu"},
+]
+dependencies = [
+  "numpy",
+  "scipy<1.15.0", # https://github.com/scipy/scipy/issues/22325#issuecomment-2676345163
+  "astropy",
+  "tqdm",
+  "PyYAML",
+  "healpy",
+  "sdssdb",
+  "sdsstools",
+  "specutils",
+  "click",
+  "matplotlib",
+  "scikit-learn",
+  "joblib",
+  "pandas",
+  "apache-airflow",
+  "decorator",
+  "h5py",
+  "thread",
+  "typer",
+  "dustmaps",
+  "fitsio"
+]
+#requires-python = ">= 3.9"
+
+[classifiers]
+development_status = "4 - Beta"
+intended_audience = "Science/Research"
+natural_language = "English"
+programming_language = "Python :: 3"
+topic = ["Documentation :: Sphinx", "Topic :: Software Development :: Libraries  :: Python Modules"]
+
+[tool.setuptools.packages.find]
+where = ["src/"]
+include = ["astra"]
+
+[project.scripts]
+astra = "astra.cli.astra:app"
+casload = "astra.cli.casload:app"
+ferre_interpolate_unnormalized_model_flux = "astra.cli.post_execution_interpolation:post_execution_interpolation"
+
+[console_scripts]
+astra = "astra.cli.astra:app"
+casload = "astra.cli.casload:app"
+ferre_interpolate_unnormalized_model_flux = "astra.cli.post_execution_interpolation:post_execution_interpolation"
+
+[tool.setuptools]
+script-files = ["scripts/vaffoff"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "pytest-sugar",
+  "pre-commit",
+  "black",
+]

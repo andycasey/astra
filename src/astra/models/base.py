@@ -24,7 +24,10 @@ from peewee import (
 )
 import time
 from inspect import getsource
-from playhouse.sqlite_ext import SqliteExtDatabase
+try:
+    from playhouse.sqlite_ext import SqliteExtDatabase
+except ImportError:
+    from peewee import SqliteDatabase as SqliteExtDatabase
 from sdsstools.configuration import get_config
 
 from astra.fields import BitField

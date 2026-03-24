@@ -18,7 +18,8 @@ user/glossary
 ```{toctree}
 :caption: Reference
 :hidden:
-api
+
+api/index
 cli
 ```
 

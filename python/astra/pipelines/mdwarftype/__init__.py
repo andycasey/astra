@@ -24,6 +24,15 @@ def mdwarftype(
     """
 
     template_flux, template_type = read_template_fluxes_and_types(template_list)
+    
+    # rectify the spectra
+    common_wavelength = 10**(3.5523 + 0.0001 * np.arange(4648))
+    mask = (7495 <= common_wavelength) * (common_wavelength <= 7505)
+    crop = (5000 <= common_wavelength) & (common_wavelength <= 8800) 
+    rectified_template_flux = np.zeros_like(template_flux)
+    for i, f in enumerate(template_flux):
+        continuum = np.nanmean(f[mask])
+        rectified_template_flux[i, crop], _ = rectification_spectrum(f[crop] / continuum)
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
@@ -37,7 +46,7 @@ def mdwarftype(
         #    checked_chunk.append(spectrum)
         #if len(checked_chunk) > 0:
         #    futures.append(executor.submit(_mdwarf_type, checked_chunk, template_flux, template_type))
-        futures.append(executor.submit(_mdwarf_type, chunk, template_flux, template_type))
+        futures.append(executor.submit(_mdwarf_type, chunk, rectified_template_flux, template_type))
 
     with tqdm(total=len(futures), desc="Collecting futures") as pb:
         for future in concurrent.futures.as_completed(futures):
@@ -56,14 +65,17 @@ def _mdwarf_type(spectra, template_flux, template_type):
             #continuum, continuum_meta = f_continuum.fit(spectrum.flux, spectrum.ivar)
             # TODO: replace this with astra.specutils.continuum.Scalar
             mask = (7495 <= spectrum.wavelength) * (spectrum.wavelength <= 7505)
+            crop = (5000 <= spectrum.wavelength) & (spectrum.wavelength <= 8800)  # crop to common range
             continuum = np.nanmean(spectrum.flux[mask])
 
-            flux = rectification_spectrum(spectrum.flux / continuum)
-            ivar = rectification_ivar(spectrum.ivar,flux)
-            chi2s = np.nansum((flux - template_flux)**2 * ivar, axis=1)
+            flux, rectified_cont = rectification_spectrum(spectrum.flux[crop] / continuum)
+            ivar = rectification_ivar(spectrum.ivar[crop], rectified_cont * continuum)  # need to add mean continuum to scale!
+            chi2s = np.nansum((flux - template_flux[:, crop])**2 * ivar, axis=1)
             index = np.argmin(chi2s)
             chi2 = chi2s[index]
-            rchi2 = chi2 / (flux.size - 2)
+            # only include nonzero ivar and where template_flux is finite in DOF
+            dof = np.sum((ivar > 0) & np.isfinite(ivar) & np.isfinite(template_flux[index, crop])) - 2
+            rchi2 = chi2 / dof
             
             spectral_type, sub_type = template_type[index]
 
@@ -118,12 +130,13 @@ def quad_func(x, a, b, c):
 
 
 def rectification_spectrum(spectrum):
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
-    rectified_spec = (spectrum / quad_func(np.arange(0, len(spectrum)), *best_fit[0]) ) - 1 #divides spectrum by best fit
-    return rectified_spec
+    ev_fine = np.isfinite(spectrum)
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_fine], spectrum[ev_fine]) #fits quadratic function
+    rectified_cont = quad_func(np.arange(0, len(spectrum)), *best_fit[0])
+    rectified_spec = (spectrum /rectified_cont ) - 1 #divides spectrum by best fit
+    return rectified_spec, rectified_cont
 
 
-def rectification_ivar(ivar,spectrum):
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
-    rectified_ivar = (ivar * (quad_func(np.arange(0, len(spectrum)), *best_fit[0]))**2 ) #divides spectrum by best fit
+def rectification_ivar(ivar, rectified_cont):
+    rectified_ivar = (ivar * rectified_cont**2 ) #divides spectrum by best fit
     return rectified_ivar

@@ -58,6 +58,15 @@ Code that generates FITS files for SDSS data releases:
 | `apogee.py` / `boss.py` | Instrument-specific product helpers. |
 | `mwm_summary.py` | `mwmAllVisit`, `mwmAllStar`, `mwmTargets` summary products. |
 
+## `spectrum/` -- Spectral synthesis framework
+
+A framework for model atmosphere interpolation and spectral synthesis. Not currently used by any active pipeline, but available for future work:
+
+- `photospheres/` -- Model atmosphere loading and interpolation (Kurucz, MARCS, ATLAS).
+- `synthesis/` -- Wrappers for spectral synthesis codes (MOOG, SME, Turbospectrum, Korg).
+- `transitions/` -- Atomic and molecular line list handling (VALD, GES formats).
+- `resampling.py` -- Wavelength grid resampling utilities.
+
 ## `specutils/` -- Spectral utilities
 
 Reusable routines for spectrum manipulation:
@@ -65,7 +74,7 @@ Reusable routines for spectrum manipulation:
 - `continuum/` -- Continuum normalisation methods.
 - `resampling.py` -- Wavelength grid resampling.
 - `lsf.py` -- Line-spread-function convolution.
-- `ndi.py` -- Non-destructive interpolation.
+- `frizzle.py` -- Spectral frizzling utilities.
 
 ## `cli/` -- Command-line interface
 

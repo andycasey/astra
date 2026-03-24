@@ -1,121 +1,102 @@
 import concurrent.futures
 import numpy as np
 import os
-import threading
-import queue
 from scipy.optimize import curve_fit
-from typing import Iterable, Union
+from typing import Iterable
+from peewee import chunked
 from tqdm import tqdm
 
 from astra import task
+from astra.models.spectrum import SpectrumMixin
 from astra.models.mdwarftype import MDwarfType
-from astra.models.boss import BossVisitSpectrum
-from astra.models.mwm import BossCombinedSpectrum
 from astra.utils import log, expand_path
 
 
 @task
 def mdwarftype(
-    spectra: Iterable[Union[BossVisitSpectrum, BossCombinedSpectrum]],
+    spectra: Iterable[SpectrumMixin],
     template_list: str = "$MWM_ASTRA/pipelines/MDwarfType/template.list",
-    max_workers: int = 64,
-    **kwargs
+    max_workers: int = 4,
+    batch_size: int = 10_000
 ) -> Iterable[MDwarfType]:
     """
     Classify a single M dwarf from spectral templates.
     """
 
     template_flux, template_type = read_template_fluxes_and_types(template_list)
+    
+    # rectify the spectra
+    common_wavelength = 10**(3.5523 + 0.0001 * np.arange(4648))
+    mask = (7495 <= common_wavelength) * (common_wavelength <= 7505)
+    crop = (5000 <= common_wavelength) & (common_wavelength <= 8800) 
+    rectified_template_flux = np.zeros_like(template_flux)
+    for i, f in enumerate(template_flux):
+        continuum = np.nanmean(f[mask])
+        rectified_template_flux[i, crop], _ = rectification_spectrum(f[crop] / continuum)
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
-    # Queue to receive futures from the submitter thread
-    future_queue = queue.Queue()
-    SENTINEL = object()
+    futures = []
+    batch_size = batch_size or int(np.ceil(len(spectra) / max_workers))
+    for chunk in tqdm(chunked(spectra, batch_size), total=1, desc="Submitting work"):
+        #checked_chunk = []
+        #for spectrum in chunk:
+        #    if "yso" not in set(spectrum.source.sdss5_cartons["alt_program"]):
+        #        continue
+        #    checked_chunk.append(spectrum)
+        #if len(checked_chunk) > 0:
+        #    futures.append(executor.submit(_mdwarf_type, checked_chunk, template_flux, template_type))
+        futures.append(executor.submit(_mdwarf_type, chunk, rectified_template_flux, template_type))
 
-    def submit_spectra():
-        """Submit spectra to executor in a separate thread."""
-        for spectrum in spectra:
-            future = executor.submit(_mdwarf_type, spectrum, template_flux, template_type)
-            future_queue.put(future)
-        future_queue.put(SENTINEL)
+    with tqdm(total=len(futures), desc="Collecting futures") as pb:
+        for future in concurrent.futures.as_completed(futures):
+            yield from future.result()
+            pb.update()
 
-    # Start submitting in background thread
-    submitter = threading.Thread(target=submit_spectra)
-    submitter.start()
 
-    # Collect and yield results as futures complete
-    pending = set()
-    done_submitting = False
 
-    while True:
-        # Grab any new futures from the queue (non-blocking)
-        while True:
-            try:
-                item = future_queue.get_nowait()
-                if item is SENTINEL:
-                    done_submitting = True
-                else:
-                    pending.add(item)
-            except queue.Empty:
-                break
+def _mdwarf_type(spectra, template_flux, template_type):
 
-        if not pending:
-            if done_submitting:
-                break
-            # Wait a bit for more futures to be submitted
-            try:
-                item = future_queue.get(timeout=0.01)
-                if item is SENTINEL:
-                    done_submitting = True
-                else:
-                    pending.add(item)
-            except queue.Empty:
-                continue
+    results = []
+    for spectrum in spectra:
+        try:                
+            #continuum_method: str = "astra.tools.continuum.Scalar", # --> mean
+            #continuum_kwargs: dict = dict(mask=[(0, 7495), (7505, 11_000)]),
+            #continuum, continuum_meta = f_continuum.fit(spectrum.flux, spectrum.ivar)
+            # TODO: replace this with astra.specutils.continuum.Scalar
+            mask = (7495 <= spectrum.wavelength) * (spectrum.wavelength <= 7505)
+            crop = (5000 <= spectrum.wavelength) & (spectrum.wavelength <= 8800)  # crop to common range
+            continuum = np.nanmean(spectrum.flux[mask])
 
-        # Wait for any pending future to complete
-        if pending:
-            done, pending = concurrent.futures.wait(
-                pending,
-                timeout=0.1,
-                return_when=concurrent.futures.FIRST_COMPLETED
+            flux, rectified_cont = rectification_spectrum(spectrum.flux[crop] / continuum)
+            ivar = rectification_ivar(spectrum.ivar[crop], rectified_cont * continuum)  # need to add mean continuum to scale!
+            chi2s = np.nansum((flux - template_flux[:, crop])**2 * ivar, axis=1)
+            index = np.argmin(chi2s)
+            chi2 = chi2s[index]
+            # only include nonzero ivar and where template_flux is finite in DOF
+            dof = np.sum((ivar > 0) & np.isfinite(ivar) & np.isfinite(template_flux[index, crop])) - 2
+            rchi2 = chi2 / dof
+            
+            spectral_type, sub_type = template_type[index]
+
+            result_flags = 1 if spectral_type == "K5.0" else 0
+
+            results.append(
+                MDwarfType(
+                    spectrum_pk=spectrum.spectrum_pk,
+                    source_pk=spectrum.source_pk,
+                    spectral_type=spectral_type,
+                    sub_type=sub_type,
+                    continuum=continuum,
+                    rchi2=rchi2,
+                    result_flags=result_flags
+                )
             )
-            for future in done:
-                yield future.result()
+        except:
+            log.exception(f"Exception in MDwarfType for spectrum {spectrum}")
+            continue
 
-    submitter.join()
-    executor.shutdown(wait=False)
-
-
-def _mdwarf_type(spectrum, template_flux, template_type):
-    """Process a single spectrum and return an MDwarfType result."""
-    try:
-        # TODO: replace this with astra.specutils.continuum.Scalar
-        mask = (7495 <= spectrum.wavelength) * (spectrum.wavelength <= 7505)
-        continuum = np.nanmean(spectrum.flux[mask])
-
-        flux = rectification_spectrum(spectrum.flux / continuum)
-        ivar = rectification_ivar(spectrum.ivar, flux)
-        chi2s = np.nansum((flux - template_flux)**2 * ivar, axis=1)
-        index = np.argmin(chi2s)
-        chi2 = chi2s[index]
-        rchi2 = chi2 / (flux.size - 2)
-
-        spectral_type, sub_type = template_type[index]
-
-        result_flags = 1 if spectral_type == "K5.0" else 0
-
-        return MDwarfType(
-            spectrum_pk=spectrum.spectrum_pk,
-            source_pk=spectrum.source_pk,
-            spectral_type=spectral_type,
-            sub_type=sub_type,
-            continuum=continuum,
-            rchi2=rchi2,
-            result_flags=result_flags
-        )
-    except:
-        return MDwarfType.from_spectrum(spectrum, flag_exception=True)
+    return results
 
 
 def read_template_fluxes_and_types(template_list):
@@ -135,8 +116,8 @@ def get_template_type(path):
 
 def read_and_resample_template(path):
     log_wl, flux = np.loadtxt(
-        expand_path(path),
-        skiprows=1,
+        expand_path(path), 
+        skiprows=1, 
         delimiter=",",
         usecols=(1, 2)
     ).T
@@ -149,12 +130,13 @@ def quad_func(x, a, b, c):
 
 
 def rectification_spectrum(spectrum):
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
-    rectified_spec = (spectrum / quad_func(np.arange(0, len(spectrum)), *best_fit[0]) ) - 1 #divides spectrum by best fit
-    return rectified_spec
+    ev_fine = np.isfinite(spectrum)
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum))[ev_fine], spectrum[ev_fine]) #fits quadratic function
+    rectified_cont = quad_func(np.arange(0, len(spectrum)), *best_fit[0])
+    rectified_spec = (spectrum /rectified_cont ) - 1 #divides spectrum by best fit
+    return rectified_spec, rectified_cont
 
 
-def rectification_ivar(ivar,spectrum):
-    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
-    rectified_ivar = (ivar * (quad_func(np.arange(0, len(spectrum)), *best_fit[0]))**2 ) #divides spectrum by best fit
+def rectification_ivar(ivar, rectified_cont):
+    rectified_ivar = (ivar * rectified_cont**2 ) #divides spectrum by best fit
     return rectified_ivar

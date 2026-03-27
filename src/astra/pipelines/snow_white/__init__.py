@@ -74,6 +74,10 @@ def snow_white(
     with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
         emu = pickle.load(pickle_file)
 
+    #with open(os.path.join(PIPELINE_DATA_DIR, "pca_spectral_model.pkl"), "rb") as pickle_file:
+     #   emu = pickle.load(pickle_file)
+    #wref=emu["wavelength"]
+
     for spectrum in spectra:
 
         if not spectrum.source.assigned_to_program("mwm_wd"):

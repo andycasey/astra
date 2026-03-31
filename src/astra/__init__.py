@@ -267,7 +267,7 @@ def generate_queries_for_task(
                     )
                 )
                 .where(where)
-                .order_by(Source.modified.desc())
+                .order_by(Source.modified.desc(), Source.pk)
             )
         else:
             where = output_model.spectrum_pk.is_null()
@@ -289,7 +289,7 @@ def generate_queries_for_task(
                 .join(Spectrum)
                 .join(output_model, JOIN.LEFT_OUTER, on=on)
                 .where(where)
-                .order_by(input_model.modified.desc())
+                .order_by(input_model.modified.desc(), input_model.spectrum_pk)
             )
         if group_by_string is not None:
             group_by_resolved = []

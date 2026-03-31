@@ -6,7 +6,7 @@ from sdsstools.configuration import get_config
 from astra.utils import log, Timer, resolve_task, resolve_model, get_return_type, expects_source_types, expects_spectrum_types, version_string_to_integer, get_task_group_by_string
 
 NAME = "astra"
-__version__ = "0.8.1"
+__version__ = "0.8.0"
 
 @decorator
 def task(
@@ -203,7 +203,8 @@ def generate_queries_for_task(
     input_model=None,
     sdss_ids=None,
     limit=None,
-    page=None
+    page=None,
+    missing_only=False,
 ):
     """
     Generate queries for input data that need to be processed by the given task.
@@ -222,6 +223,10 @@ def generate_queries_for_task(
 
     :param limit: [optional]
         Limit the number of rows for each spectrum model query.
+
+    :param missing_only: [optional]
+        If True, only include rows that are missing from the output model.
+        Otherwise, things will be included if they have a more recent modified time.
     """
     from astra.models.source import Source
     from astra.models.spectrum import Spectrum
@@ -243,10 +248,11 @@ def generate_queries_for_task(
 
     for input_model in input_models:
         if input_model == Source:
-            where = (
-                output_model.source_pk.is_null()
-            |   (input_model.modified > output_model.modified)
-            )
+
+            where = output_model.source_pk.is_null()
+            if not missing_only:
+                where |= (input_model.modified > output_model.modified)
+
             if sdss_ids is not None:
                 where &= (Source.sdss_id.in_(sdss_ids))
             q = (
@@ -264,10 +270,10 @@ def generate_queries_for_task(
                 .order_by(Source.modified.desc())
             )
         else:
-            where = (
-                output_model.spectrum_pk.is_null()
-            |   (input_model.modified > output_model.modified)
-            )
+            where = output_model.spectrum_pk.is_null()
+            if not missing_only:
+                where |= (input_model.modified > output_model.modified)
+
             if sdss_ids is not None:
                 where &= (Source.sdss_id.in_(sdss_ids))
 

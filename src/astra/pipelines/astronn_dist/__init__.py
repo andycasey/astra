@@ -17,7 +17,7 @@ def astronn_dist(
     #model_path: str = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039136/software/git/astroNN_projects/astroNN_dist_model_parameter.pt",  # for PyTorch version
     parallel: Optional[bool] = True,
     batch_size: Optional[int] = 100,
-    cpu_count: Optional[int] = 1,
+    cpu_count: Optional[int] = 64,
     **kwargs
 ) -> Iterable[AstroNNdist]:
     """

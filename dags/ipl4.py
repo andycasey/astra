@@ -62,7 +62,7 @@ with DAG(
         bossnet_star = (
             BashOperator(
                 task_id="star",
-                bash_command='astra srun bossnet BossCombinedSpectrum --nodes 1 --procs 64'
+                bash_command='astra srun bossnet BossCombinedSpectrum --mem=16000 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
             )
         )
         bossnet_star >> (
@@ -237,7 +237,7 @@ with DAG(
         the_payne_star = (
             BashOperator(
                 task_id="star",
-                bash_command='astra srun the_payne apogee.ApogeeCoaddedSpectrumInApStar --nodes 1 --mem 0 --time="48:00:00"'
+                bash_command='astra srun the_payne apogee.ApogeeCoaddedSpectrumInApStar --procs 8 --nodes 1 --mem 0 --time="48:00:00"'
             )
         )
         the_payne_star >> (
@@ -276,7 +276,8 @@ with DAG(
         (
             BashOperator(
                 task_id="astronn_dist",
-                bash_command='astra srun astronn_dist --mem=16000 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+                # astronn_dist does not use GPUS
+                bash_command='astra srun astronn_dist --nodes 1 --time="48:00:00"' # --mem=16000 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
             )
         ) >> (
             BashOperator(

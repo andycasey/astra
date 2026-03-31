@@ -593,15 +593,14 @@ def srun(
                 try:
                     future = next(concurrent.futures.as_completed(futures, timeout=1))
                 except TimeoutError:
-                    pass
+                    None
                 else:
                     futures.remove(future)
                     max_returncode = max(max_returncode, future.result().returncode)
 
                 for progress, kwds in status_path_locks.items():
-                    for path, skip in kwds.items():
 
-                        # copy the contents to a temp file
+                    for path, skip in kwds.items():
                         try:
                             with open(path, "r") as fp:
                                 for n in range(skip):
@@ -610,7 +609,7 @@ def srun(
                         except FileNotFoundError:
                             continue
                         except:
-                            # no content
+                            # no new content
                             continue
 
                         kwds[path] += len(content)
@@ -619,14 +618,15 @@ def srun(
                             try:
                                 command, *state = json.loads(line.rstrip())
                                 if command == "add_task":
-                                    number, args, kwds = state
-                                    mappings[(path, number)] = progress.add_task(*args, **kwds)
+                                    number, args, task_kwds = state
+                                    mappings[(path, number)] = progress.add_task(*args, **task_kwds)
                                 elif command == "update":
-                                    (ref_num, *args), kwds = state
-                                    progress.update(mappings[(path, ref_num)], *args, **kwds)
+                                    (ref_num, *args), task_kwds = state
+                                    progress.update(mappings[(path, ref_num)], *args, **task_kwds)
+
                             except Exception as e:
                                 log.exception(f"Failed to parse line: {line} - {e}")
-                                continue
+
 
     sys.exit(max_returncode)
 
@@ -660,6 +660,8 @@ def run(
             sdss_ids.append(spectrum_model)
         spectrum_model = None
 
+    import os
+    import json
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn
     from rich.live import Live
     from rich.panel import Panel
@@ -678,6 +680,32 @@ def run(
     # Re-direct log handler
     console = Console()
 
+    class RemoteProgress:
+        def __init__(self, path):
+            self.path = path
+            self.task_counter = 0
+            if not os.path.exists(path):
+                with open(path, "w"):
+                    pass
+            return None
+
+        def append(self, data):
+            try:
+                r = json.dumps(data) + "\n"
+                with open(self.path, "a") as fp:
+                    fp.write(r)
+                return True
+            except Exception as e:
+                return False
+
+        def update(self, *args, **kwargs):
+            return self.append(("update", args, kwargs))
+
+        def add_task(self, *args, **kwargs):
+            self.task_counter += 1
+            self.append(("add_task", self.task_counter, args, kwargs))
+            return self.task_counter
+
     use_local_renderable = (live_renderable_path is None) and not fun_accepts_live_renderable
     if use_local_renderable:
         overall_progress = Progress(
@@ -687,6 +715,10 @@ def run(
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         )
         live_renderable.add_row(Panel(overall_progress, title=task))
+    elif live_renderable_path is not None:
+        overall_progress = RemoteProgress(live_renderable_path)
+    else:
+        overall_progress = None
 
     iterable = generate_queries_for_task(
         fun,
@@ -696,12 +728,15 @@ def run(
         page=page
     )
     from time import sleep
+
+
+
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
         for model, q in iterable:
             if total := q.count():
                 worker = fun(q, live=True, live_renderable=(live_renderable_path or live_renderable))
 
-                if use_local_renderable:
+                if use_local_renderable or (overall_progress is not None):
                     task_id = overall_progress.add_task(model.__name__)
                     overall_progress.update(task_id, total=total)
                     if dry_run:
@@ -713,9 +748,12 @@ def run(
                         for r in worker:
                             overall_progress.update(task_id, advance=1, refresh=True)
                     #overall_progress.update(task_id, refresh=True, completed=True)
-                elif not dry_run:
-                    for r in worker:
-                        pass
+                else:
+                    if not dry_run:
+                        for r in worker:
+                            pass
+
+
 
     """
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as p:

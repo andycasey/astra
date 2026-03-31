@@ -33,6 +33,165 @@ from scipy.optimize import leastsq, least_squares
 from .postprocessing import do_post
 
 
+# ------------------------------------------------------------------ #
+#  Vectorized SVR prediction: extract sklearn internals into numpy    #
+# ------------------------------------------------------------------ #
+
+def _get_svr_estimator(sm):
+    """Get the underlying SVR estimator from a SlamModel."""
+    reg = sm.regressor
+    if hasattr(reg, 'best_estimator_'):
+        return reg.best_estimator_
+    return reg
+
+
+def _get_effective_gamma(svr):
+    """Get the numeric gamma from a fitted SVR."""
+    if hasattr(svr, '_gamma'):
+        return float(svr._gamma)
+    g = svr.gamma
+    if isinstance(g, (int, float)):
+        return float(g)
+    if g == 'scale':
+        # After fit, sklearn stores the computed gamma in _gamma.
+        # Fallback: recompute from training data shape.
+        if hasattr(svr, 'shape_fit_'):
+            n_features = svr.shape_fit_[1]
+            # sklearn 'scale' = 1 / (n_features * X.var()), but we don't
+            # have X.var() post-fit. _gamma should always exist for fitted models.
+            raise RuntimeError(
+                "SVR._gamma not found; cannot recover 'scale' gamma. "
+                "Upgrade sklearn or re-train with explicit gamma."
+            )
+    if g == 'auto':
+        return 1.0 / svr.shape_fit_[1]
+    return float(g)
+
+
+def extract_svr_arrays(sms):
+    """Extract SVR internals from a list of SlamModel into padded numpy arrays.
+
+    Returns a dict that can be passed to predict_spectrum_fast() and
+    costfun_for_label_fast().
+    """
+    n_pixels = len(sms)
+    svrs = [_get_svr_estimator(sm) for sm in sms]
+
+    # Collect per-pixel data
+    sv_list = [svr.support_vectors_ for svr in svrs]          # (n_sv_i, n_feat)
+    dc_list = [svr.dual_coef_.ravel() for svr in svrs]        # (n_sv_i,)
+    intercepts = np.array([svr.intercept_[0] for svr in svrs]) # (n_pixels,)
+    gammas = np.array([_get_effective_gamma(svr) for svr in svrs])
+
+    n_feat = sv_list[0].shape[1]
+    sv_counts = np.array([sv.shape[0] for sv in sv_list], dtype=np.int32)
+    max_nsv = int(sv_counts.max())
+
+    # Pad into dense 3D arrays
+    sv_padded = np.zeros((n_pixels, max_nsv, n_feat), dtype=np.float64)
+    dc_padded = np.zeros((n_pixels, max_nsv), dtype=np.float64)
+    for i, (sv, dc) in enumerate(zip(sv_list, dc_list)):
+        n = sv.shape[0]
+        sv_padded[i, :n, :] = sv
+        dc_padded[i, :n] = dc
+
+    # Boolean mask for valid (non-padding) support vectors
+    sv_mask = np.arange(max_nsv)[None, :] < sv_counts[:, None]  # (n_pixels, max_nsv)
+
+    return dict(
+        sv_padded=sv_padded,
+        dc_padded=dc_padded,
+        intercepts=intercepts,
+        gammas=gammas,
+        sv_mask=sv_mask,
+        n_pixels=n_pixels,
+    )
+
+
+def predict_spectrum_fast(X_, svr_arrays, mask=None):
+    """Predict all pixels at once using vectorized numpy RBF kernel.
+
+    Parameters
+    ----------
+    X_ : ndarray, shape (n_features,) or (1, n_features)
+    svr_arrays : dict from extract_svr_arrays()
+    mask : bool ndarray (n_pixels,), optional
+
+    Returns
+    -------
+    predictions : ndarray (n_pixels,)
+    """
+    sv_padded = svr_arrays['sv_padded']
+    dc_padded = svr_arrays['dc_padded']
+    intercepts = svr_arrays['intercepts']
+    gammas = svr_arrays['gammas']
+    sv_valid = svr_arrays['sv_mask']
+    n_pixels = svr_arrays['n_pixels']
+
+    X_ = np.atleast_1d(X_).ravel()  # (n_feat,)
+
+    if mask is not None and not np.all(mask):
+        # Only compute for masked pixels
+        idx = np.where(mask)[0]
+        if len(idx) == 0:
+            return np.full(n_pixels, np.nan)
+        sv_sub = sv_padded[idx]
+        dc_sub = dc_padded[idx]
+        g_sub = gammas[idx]
+        int_sub = intercepts[idx]
+        vm_sub = sv_valid[idx]
+
+        diff = X_[np.newaxis, np.newaxis, :] - sv_sub  # (n_sub, max_nsv, n_feat)
+        sq_dist = np.einsum('ijk,ijk->ij', diff, diff)  # (n_sub, max_nsv)
+        K = np.exp(-g_sub[:, np.newaxis] * sq_dist)
+        K[~vm_sub] = 0.0
+        preds_sub = np.einsum('ij,ij->i', dc_sub, K) + int_sub
+
+        result = np.full(n_pixels, np.nan)
+        result[idx] = preds_sub
+        return result
+    else:
+        # Compute all pixels
+        diff = X_[np.newaxis, np.newaxis, :] - sv_padded  # (n_pix, max_nsv, n_feat)
+        sq_dist = np.einsum('ijk,ijk->ij', diff, diff)    # (n_pix, max_nsv)
+        K = np.exp(-gammas[:, np.newaxis] * sq_dist)
+        K[~sv_valid] = 0.0
+        return np.einsum('ij,ij->i', dc_padded, K) + intercepts
+
+
+def costfun_for_label_fast(X_, svr_arrays, test_flux, test_ivar, mask):
+    """Vectorized cost function for least_squares optimization."""
+    X_ = X_.reshape(1, -1)
+    if mask is None:
+        mask = np.ones(svr_arrays['n_pixels'], dtype=bool)
+    if test_ivar is None:
+        test_ivar = np.ones_like(test_flux)
+    else:
+        test_ivar = np.where(test_ivar < 0, 0., test_ivar)
+
+    pred_flux = predict_spectrum_fast(X_, svr_arrays, mask).astype(float)
+    res = (test_flux.ravel() - pred_flux.ravel()) * np.sqrt(test_ivar.ravel())
+    res[np.isnan(res)] = 0.
+    return res
+
+
+def predict_labels3_fast(X0, svr_arrays, test_flux, test_ivar=None, mask=None,
+                         flux_scaler=None, ivar_scaler=None, labels_scaler=None,
+                         **kwargs):
+    """predict_labels3 using vectorized SVR prediction."""
+    if flux_scaler is not None:
+        test_flux = flux_scaler.transform(test_flux.reshape(1, -1)).flatten()
+    if ivar_scaler is not None:
+        test_ivar = ivar_scaler.transform(test_ivar.reshape(1, -1)).flatten()
+
+    ls_r = least_squares(
+        costfun_for_label_fast, X0, method="trf", loss="soft_l1",
+        args=(svr_arrays, test_flux, test_ivar, mask), **kwargs
+    )
+    pp_r = do_post(ls_r, labels_scaler)
+    return pp_r
+
+
 def predict_pixel(svr, X_, mask=True):
     """ predict single pixels for a given wavelength
 

@@ -25,8 +25,10 @@ sys.modules['slam.standardization'] = _standardization_module
 from .laspec.convolution import conv_spec, fwhm2resolution
 from .laspec.qconv import conv_spec_Gaussian
 from .laspec.normalization import normalize_spectrum, normalize_spectra_block
-from .laspec.binning import rebin
+from .laspec.binning import rebin, rebin_batch
+from .predict import extract_svr_arrays
 
+import os
 import numpy as np
 from tqdm import tqdm
 from joblib import load
@@ -40,25 +42,69 @@ from typing import Iterable, Optional
 from astra.models import Source
 
 
+def _prefetch_sources(spectra):
+    """Bulk-load Source objects to avoid N+1 queries.
+
+    Modifies spectra in-place by setting the source cache on each object.
+    Returns the list of spectra (materialized if it was an iterator).
+    """
+    if not isinstance(spectra, list):
+        spectra = list(spectra)
+
+    source_pks = set()
+    for s in spectra:
+        # source_id is the raw FK value (peewee convention)
+        pk = s.__data__.get("source_pk") or getattr(s, "source_id", None)
+        if pk is not None:
+            source_pks.add(pk)
+
+    if not source_pks:
+        return spectra
+
+    # Bulk fetch all Source objects in one query
+    sources_by_pk = {}
+    # Query in batches of 5000 to avoid overly large IN clauses
+    source_pks = list(source_pks)
+    for i in range(0, len(source_pks), 5000):
+        batch = source_pks[i:i + 5000]
+        for src in Source.select().where(Source.pk.in_(batch)):
+            sources_by_pk[src.pk] = src
+
+    # Pre-populate the FK cache on each spectrum
+    for spectrum in spectra:
+        pk = spectrum.__data__.get("source_pk") or getattr(spectrum, "source_id", None)
+        if pk in sources_by_pk:
+            spectrum.source = sources_by_pk[pk]
+
+    return spectra
+
+
+def _check_selection(source):
+    """Check if a source passes SLAM selection criteria.
+
+    Returns (passes_magnitude_cut, passes_program_cut).
+    """
+    passes_magnitude_cut = (
+        source.g_mag is not None
+        and source.rp_mag is not None
+        and source.plx is not None
+        and source.plx > 0
+        and (source.g_mag - source.rp_mag) > 0.56
+        and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
+    )
+    passes_program_cut = (
+        ("mwm_yso" in source.sdss5_cartons["program"])
+        or ("mwm_snc" in source.sdss5_cartons["program"])
+    )
+    return passes_magnitude_cut, passes_program_cut
+
+
 @task
 def slam_filter(spectra: Iterable[BossCombinedSpectrum], **kwargs) -> Iterable[Slam]:
+    spectra = _prefetch_sources(spectra)
     for spectrum in spectra:
-
         source = spectrum.source
-
-        # Check if spectrum passes selection criteria (from Zach Way, mwm-astra 413)
-        passes_magnitude_cut = (
-            source.g_mag is not None
-            and source.rp_mag is not None
-            and source.plx is not None
-            and source.plx > 0
-            and (source.g_mag - source.rp_mag) > 0.56
-            and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
-        )
-        passes_program_cut = (
-            ("mwm_yso" in spectrum.source.sdss5_cartons["program"])
-        or  ("mwm_snc" in spectrum.source.sdss5_cartons["program"])
-        )
+        passes_magnitude_cut, passes_program_cut = _check_selection(source)
         if not (passes_magnitude_cut or passes_program_cut):
             yield Slam.from_spectrum(
                 spectrum,
@@ -67,103 +113,23 @@ def slam_filter(spectra: Iterable[BossCombinedSpectrum], **kwargs) -> Iterable[S
             )
 
 
-#  According to the Bible, we’re roughly dealing with an absolute magnitude range M_G in [7.57, 13.35] for M dwarfs between 4000 and 3000 K. It might be worth including this cut when training/running the SLAM
-@task
-def slam(
-    spectra: Iterable[BossCombinedSpectrum],
-    page=None,
-    limit=None,
-    n_jobs=128,
-    **kwargs
-) -> Iterable[Slam]:
-
-    wave_interp = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/dM_train_wave_standard.csv"))['wave']
-    dump_path = expand_path("$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump")
-
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=UserWarning, message='.*unpickle.*')
-        Pre = load(dump_path)
-
-    flux_boss = []
-    ivar_boss = []
-    used_spectra = []
-    for spectrum in tqdm(spectra, desc="Collecting"):
-
-        source = spectrum.source
-
-        # Check if spectrum passes selection criteria (from Zach Way, mwm-astra 413)
-        passes_magnitude_cut = (
-            source.g_mag is not None
-            and source.rp_mag is not None
-            and source.plx is not None
-            and source.plx > 0
-            and (source.g_mag - source.rp_mag) > 0.56
-            and (source.g_mag + 5 + 5 * np.log10(source.plx / 1000)) > 5.553
-        )
-        passes_program_cut = (
-            ("mwm_yso" in spectrum.source.sdss5_cartons["program"])
-        or  ("mwm_snc" in spectrum.source.sdss5_cartons["program"])
-        )
-        if not (passes_magnitude_cut or passes_program_cut):
-            yield Slam.from_spectrum(
-                spectrum,
-                flag_not_magnitude_cut=not passes_magnitude_cut,
-                flag_not_carton_match=not passes_program_cut
-            )
-            continue
-
-        # only redshift if it is a visit spectrum (not a stack)
+def _get_n_jobs(n_jobs):
+    """Resolve n_jobs: None -> auto-detect from available CPUs."""
+    if n_jobs is None:
         try:
-            if isinstance(spectrum, BossCombinedSpectrum):
-                wave = spectrum.wavelength
-            else:
-                wave = spectrum.wavelength / (1 + spectrum.xcsao_v_rad / 299792.458)
-            flux_n, invar_n = rebin(
-                wave,
-                flux=spectrum.flux,
-                flux_err=spectrum.e_flux,
-                wave_new=wave_interp
-            )
-            flux_boss.append(flux_n)
-            ivar_boss.append(invar_n)
-        except Exception:
-            log.exception(f"Failed to rebin spectrum {spectrum.spectrum_pk}")
-        else:
-            used_spectra.append(spectrum)
+            return len(os.sched_getaffinity(0))
+        except AttributeError:
+            return os.cpu_count() or 1
+    return n_jobs
 
-    flux_boss = np.array(flux_boss)
-    ivar_boss = np.array(ivar_boss)
 
-    print("normalizing spectra block")
-    flux_norm, flux_cont = normalize_spectra_block(
-        wave_interp, flux_boss,
-        (6001.755, 8957.321),
-        10.,
-        p=(1E-8, 1E-7),
-        #ivar_block=ivar_boss, # Dan doesn't use this, but there is an option for it.
-        q=0.7, eps=1E-19, rsv_frac=2., n_jobs=n_jobs, verbose=5
-    )
-    flux_norm[flux_norm>2.] = 1
-    flux_norm[flux_norm<0] = 0
-    ivars_norm = (ivar_boss * flux_cont**2)
+def _yield_chunk_results(Xinit, Rpred, chunk_spectra):
+    """Yield Slam results for one processed chunk."""
+    Xpred = np.array([r["x"] for r in Rpred])
+    Xpred_err = np.array([np.diag(r["pcov"]) for r in Rpred])
 
-    log.info("Predicting labels (first pass)")
-    Xinit = Pre.predict_labels_quick(flux_norm, ivars_norm, n_jobs=n_jobs, verbose=5)
-
-    SEP_1_LENGTH = len(flux_norm)
-
-    log.info("Predicting labels")
-    Rpred = Pre.predict_labels_multi(Xinit[0:SEP_1_LENGTH], flux_norm[0:SEP_1_LENGTH], ivars_norm[0:SEP_1_LENGTH],n_jobs=n_jobs,verbose=5)
-    Xpred = np.array([_["x"] for _ in Rpred])
-    Xpred_err = np.array([np.diag(_["pcov"]) for _ in Rpred])
-
-    #feh_niu,feh,alpha_m,teff,logg=(Xpred[:,_] for _ in range(5))
-    #feh_niu_err,feh_err,alpha_m_err,teff_err,logg_err=(Xpred_err[:,_] for _ in range(5))
-
-    for i, spectrum in enumerate(used_spectra):
-        kwds = dict(source_pk=spectrum.source_pk, spectrum_pk=spectrum.spectrum_pk)
-        kwds.update(
+    for i, spectrum in enumerate(chunk_spectra):
+        kwds = dict(
             fe_h_niu=Xpred[i, 0],
             e_fe_h_niu=Xpred_err[i, 0],
             fe_h=Xpred[i, 1],
@@ -191,7 +157,111 @@ def slam(
             flag_fe_h_outside_bounds=(kwds["fe_h"] < -1) or (kwds["fe_h"] > 0.5),
             flag_bad_optimizer_status=(kwds["status"] > 0 and kwds["status"] != 2) | (kwds["status"] < 0),
         )
-        yield Slam(**kwds)
+        yield Slam.from_spectrum(spectrum, **kwds)
+
+
+#  According to the Bible, we're roughly dealing with an absolute magnitude range M_G in [7.57, 13.35] for M dwarfs between 4000 and 3000 K. It might be worth including this cut when training/running the SLAM
+@task
+def slam(
+    spectra: Iterable[BossCombinedSpectrum],
+    page=None,
+    limit=None,
+    n_jobs=None,
+    batch_size=500,
+    **kwargs
+) -> Iterable[Slam]:
+
+    n_jobs = _get_n_jobs(n_jobs)
+    log.info(f"SLAM using n_jobs={n_jobs}")
+
+    wave_interp = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/dM_train_wave_standard.csv"))['wave']
+    dump_path = expand_path("$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump")
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning, message='.*unpickle.*')
+        Pre = load(dump_path)
+
+    # Extract SVR arrays once for vectorized prediction
+    svr_arrays = extract_svr_arrays(Pre.sms)
+
+    # --- Phase 1: Bulk prefetch sources & filter spectra ---
+    spectra = _prefetch_sources(spectra)
+
+    wave_batch = []
+    flux_batch = []
+    ferr_batch = []
+    used_spectra = []
+
+    for spectrum in tqdm(spectra, desc="Filtering"):
+        source = spectrum.source
+        passes_magnitude_cut, passes_program_cut = _check_selection(source)
+
+        if not (passes_magnitude_cut or passes_program_cut):
+            yield Slam.from_spectrum(
+                spectrum,
+                flag_not_magnitude_cut=not passes_magnitude_cut,
+                flag_not_carton_match=not passes_program_cut
+            )
+            continue
+
+        try:
+            if isinstance(spectrum, BossCombinedSpectrum):
+                wave = spectrum.wavelength
+            else:
+                wave = spectrum.wavelength / (1 + spectrum.xcsao_v_rad / 299792.458)
+            wave_batch.append(wave)
+            flux_batch.append(spectrum.flux)
+            ferr_batch.append(spectrum.e_flux)
+        except Exception:
+            log.exception(f"Failed to read spectrum {spectrum.spectrum_pk}")
+            continue
+
+        used_spectra.append(spectrum)
+
+    if not used_spectra:
+        return
+
+    # --- Phase 2: Vectorized batch rebinning ---
+    log.info(f"Rebinning {len(used_spectra)} spectra")
+    flux_boss, ivar_boss = rebin_batch(wave_batch, flux_batch, ferr_batch, wave_interp)
+
+    # --- Phase 3: Process in chunks (normalize -> predict) ---
+    n_total = len(used_spectra)
+    for start in range(0, n_total, batch_size):
+        end = min(start + batch_size, n_total)
+        chunk_flux = flux_boss[start:end]
+        chunk_ivar = ivar_boss[start:end]
+        chunk_spectra = used_spectra[start:end]
+        chunk_size = end - start
+
+        log.info(f"Processing chunk [{start}:{end}] of {n_total}")
+
+        # Normalize
+        flux_norm, flux_cont = normalize_spectra_block(
+            wave_interp, chunk_flux,
+            (6001.755, 8957.321),
+            10.,
+            p=(1E-8, 1E-7),
+            q=0.7, eps=1E-19, rsv_frac=2., n_jobs=n_jobs, verbose=5
+        )
+        flux_norm[flux_norm > 2.] = 1
+        flux_norm[flux_norm < 0] = 0
+        ivars_norm = chunk_ivar * flux_cont**2
+
+        # Quick chi2 search for initial labels
+        log.info("Predicting labels (first pass)")
+        Xinit = Pre.predict_labels_quick(flux_norm, ivars_norm, n_jobs=n_jobs, verbose=5)
+
+        # Full optimization with vectorized SVR
+        log.info("Predicting labels (optimization)")
+        Rpred = Pre.predict_labels_multi_fast(
+            Xinit, flux_norm, ivars_norm,
+            n_jobs=n_jobs, verbose=5, svr_arrays=svr_arrays
+        )
+
+        # Yield results for this chunk
+        yield from _yield_chunk_results(Xinit, Rpred, chunk_spectra)
 
 
 

@@ -37,7 +37,8 @@ from .hyperparameter import (summarize_hyperparameters_to_table,
                              summarize_table,
                              hyperparameter_grid_stats)
 #from .mcmc import predict_label_mcmc
-from .predict import predict_labels3, predict_labels_chi2, predict_spectrum, predict_pixel
+from .predict import (predict_labels3, predict_labels_chi2, predict_spectrum,
+                      predict_pixel, extract_svr_arrays, predict_labels3_fast)
 from .standardization import standardize, standardize_ivar
 from .train2 import train_multi_pixels, train_single_pixel
 from .utils import convolve_mask, uniform, getsize, sizeof
@@ -1108,6 +1109,110 @@ class Slam3(object):
         # 10. scale X_pred back if necessary
         # if labels_scaler is not None:
         #     X_pred = labels_scaler.inverse_transform(X_pred)
+
+        return r_pred
+
+    def predict_labels_multi_fast(self, X0, test_flux, test_ivar=None, mask=None,
+                                  model_ivar=None, flux_eps=None, ivar_eps=1e0,
+                                  flux_scaler=True, ivar_scaler=True,
+                                  labels_scaler=True, n_jobs=1, verbose=False,
+                                  svr_arrays=None, **kwargs):
+        """predict_labels_multi using vectorized SVR prediction.
+
+        Identical preprocessing to predict_labels_multi, but dispatches to
+        predict_labels3_fast which uses numpy RBF kernel evaluation instead
+        of per-pixel sklearn SVR.predict() calls.
+
+        Pass pre-extracted svr_arrays (from extract_svr_arrays(self.sms))
+        to avoid re-extracting on every call.
+        """
+        if "profile" in kwargs:
+            if kwargs["profile"] is None:
+                kwargs.pop("profile")
+            else:
+                raise AssertionError(
+                    "@Slam: use Slam.predict_labels_ipc instead!")
+
+        test_flux, test_ivar = self.heal_the_world(
+            test_flux, test_ivar, **self.heal_kwargs)
+
+        n_test = test_flux.shape[0]
+
+        # 1. scalers
+        if flux_scaler:
+            flux_scaler = self.tr_flux_scaler
+        else:
+            flux_scaler = None
+        if ivar_scaler:
+            ivar_scaler = self.tr_ivar_scaler
+        else:
+            ivar_scaler = None
+        if labels_scaler:
+            labels_scaler = self.tr_labels_scaler
+        else:
+            labels_scaler = None
+
+        # 2. scale test_flux
+        if flux_scaler is not None:
+            test_flux = flux_scaler.transform(test_flux)
+
+        # 3. mask & ivar
+        if mask is None:
+            mask = np.ones_like(test_flux, dtype=bool)
+        elif mask.ndim == 1 and len(mask) == test_flux.shape[1]:
+            mask = np.array([mask for _ in range(n_test)])
+        mask &= test_ivar > 0
+
+        if test_ivar is None:
+            test_ivar = np.ones_like(test_flux, dtype=float)
+        elif ivar_scaler is not None:
+            test_ivar = ivar_scaler.transform(test_ivar)
+
+        test_ivar = np.where(
+            np.logical_and(test_ivar >= ivar_eps, np.isfinite(test_ivar)),
+            test_ivar, np.zeros_like(test_ivar))
+
+        # model error
+        if model_ivar is None:
+            mse = -self.training_nmse(1, False)
+            model_ivar = mse**-2.
+        model_ivar = np.where(
+            np.logical_and(model_ivar > ivar_eps, np.isfinite(model_ivar)),
+            model_ivar, 0.)
+        test_ivar = np.where(
+            np.logical_or(model_ivar < ivar_eps, test_ivar < ivar_eps), 0.,
+            test_ivar * model_ivar / (test_ivar + model_ivar))
+        test_ivar = np.where(np.isfinite(test_ivar), test_ivar, 0.)
+
+        if flux_eps is not None:
+            mask = np.logical_and(mask, test_flux > flux_eps)
+        else:
+            mask = np.logical_and(mask, test_ivar > 0.)
+
+        assert test_flux.shape == test_ivar.shape
+        assert test_flux.shape == mask.shape
+
+        # X0
+        if X0.ndim == 1:
+            X0 = X0.reshape(1, -1).repeat(n_test, axis=0)
+        elif X0.shape[0] == 1:
+            X0 = X0.reshape(1, -1).repeat(n_test, axis=0)
+        if labels_scaler is not None:
+            X0 = labels_scaler.transform(X0)
+
+        # Extract SVR arrays once (or reuse pre-extracted)
+        if svr_arrays is None:
+            svr_arrays = extract_svr_arrays(self.sms)
+
+        # Parallel prediction with vectorized cost function
+        r_pred = Parallel(n_jobs=n_jobs, verbose=verbose)(
+            delayed(predict_labels3_fast)(
+                X0[i], svr_arrays, test_flux[i],
+                test_ivar=test_ivar[i], mask=mask[i],
+                flux_scaler=None, ivar_scaler=None,
+                labels_scaler=self.tr_labels_scaler,
+                **kwargs) for i in range(n_test)
+        )
 
         return r_pred
 

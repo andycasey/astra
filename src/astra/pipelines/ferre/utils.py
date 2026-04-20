@@ -12,7 +12,7 @@ from itertools import cycle
 from astra.utils import log, expand_path
 
 
-TRANSLATE_LABELS = { 
+TRANSLATE_LABELS = {
     "teff": "TEFF",
     "logg": "LOGG",
     "log10_v_micro": "LOG10VDOP",
@@ -26,7 +26,7 @@ TRANSLATE_LABELS = {
 def get_input_spectrum_primary_keys(stage_dir):
     """
     Get all spectrum identifiers analyzed in a given stage.
-    
+
     :param stage_dir:
         The stage directory (e.g., ``/your/parent_folder/coarse``)
     """
@@ -55,8 +55,8 @@ def parse_control_kwds(input_nml_path):
     return control_kwds
 
 def execute_ferre(input_nml_path, pwd, timeout=None):
-        
-    if pwd is None:    
+
+    if pwd is None:
         pwd = os.path.dirname(path)
 
     stdout_path = f"{input_nml_path}.stdout"
@@ -71,7 +71,7 @@ def execute_ferre(input_nml_path, pwd, timeout=None):
                 stdout=stdout,
                 stderr=stderr,
                 check=False,
-                timeout=timeout, 
+                timeout=timeout,
             )
 
     return None
@@ -116,7 +116,7 @@ def de_mask_apogee_pixel_array(ferre_array, fill_value=np.nan):
         si += pixels
     assert np.sum(pixel_array != fill_value) == 7514
     return pixel_array
-'''              
+'''
 
 
 
@@ -124,7 +124,7 @@ def de_mask_apogee_pixel_array(ferre_array, fill_value=np.nan):
 
 def get_ferre_spectrum_name(*args):
     return "_".join(map(str, args))
-    
+
 def int_or_none(_):
     try:
         return int(_)
@@ -151,7 +151,7 @@ def get_ferre_label_name(parameter_name, ferre_label_names, transforms=None):
     except:
         if parameter_name in ferre_label_names:
             return parameter_name
-        
+
     raise ValueError(f"Cannot match {parameter_name} among {ferre_label_names}")
 
 
@@ -196,7 +196,7 @@ def parse_header_path(header_path):
             int(date_str[2:4]),
             int(date_str[4:6]),
         )
-        if radiative_transfer_code == "turbospec":        
+        if radiative_transfer_code == "turbospec":
             lsf = parts[-3].rstrip("s")[-1]
             lsf_telescope_model = "lco25m" if parts[-3].endswith("s") else "apo25m"
         else:
@@ -205,6 +205,8 @@ def parse_header_path(header_path):
 
         is_giant_grid = gd == "g"
 
+    if "combo5" in basename:
+        lsf = "combo5"
     short_grid_name = f"{lsf_telescope_model}_{lsf}_{spectral_type}{gd}"
 
     kwds = dict(
@@ -333,7 +335,7 @@ def validate_ferre_control_keywords(
         1. Polynomial fitting using an iterative sigma clipping algrithm (set by
            `continuum_order` and `continuum_reject` keywords). Note that even if this
            option is selected, FERRE will perform continuum normalization on a per-segment
-           level, where the segment here refers to the model segments stored in the 
+           level, where the segment here refers to the model segments stored in the
            FERRE header file (e.g., one segment per chip). You can confirm this by
            setting `continuum_flag=1`, `continuum_order=0` and you will see that
            each chip has been continuum normalised separately.
@@ -389,10 +391,10 @@ def validate_ferre_control_keywords(
     :param f_format: [optional]
         File format of the FERRE grid: 0 (ASCII) or 1 (UNF format, default).
         This corresponds to the FERRE keyword `f_format`.
-    
+
     :param f_sort: [optional]
         Ask FERRE to sort the outputs to be the same ordering as the inputs (default: False)
-        
+
         WARNING: FERRE does this in a very inefficient way. The sorting is an N^2
         operation that is performed ON DISK (i.e., it is not done in memory). This
         means it can take a huge time just to sort the outputs after the main
@@ -409,7 +411,7 @@ def validate_ferre_control_keywords(
         "erfile": "e_flux.input",
         "opfile": "parameter.output",
         # This is to distinguish it from when we do the interpolation run and get the (unaltered) model flux
-        "offile": "rectified_model_flux.output", 
+        "offile": "rectified_model_flux.output",
         "sffile": "rectified_flux.output",
     }
     headers, *segment_headers = read_ferre_headers(header_path)
@@ -513,12 +515,12 @@ def format_ferre_control_keywords(ferre_kwds: dict, n_obj) -> str:
         "nov",
         "indv",
         "synthfile(1)",
-        "filterfile",        
+        "filterfile",
         "pfile",
         "offile",
         "erfile",
         "opfile",
-        "ffile",        
+        "ffile",
         "obscont",
         "sffile",
         "errbar",
@@ -564,7 +566,7 @@ def format_ferre_control_keywords(ferre_kwds: dict, n_obj) -> str:
                 value = ferre_kwds[key]
             except:
                 value = ferre_kwds[key.upper()]
-                
+
             if isinstance(value, str) and key.lower() not in ("indv", "indini"):
                 value = f"'{value}'"
             else:
@@ -572,20 +574,20 @@ def format_ferre_control_keywords(ferre_kwds: dict, n_obj) -> str:
                 #    value = f" {value}"
                 #else:
                 value = f"{value}"
-            
+
             #if "filterfile" in keys or "FILTERFILE" in keys and key.upper() == "SYNTHFILE(1)":
-            #    value = value.replace("/uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/", "")                
-            
+            #    value = value.replace("/uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/", "")
+
             #if key.lower() == "filterfile":
             #    value = f"'{os.path.basename(ferre_kwds[key])}'"
             # represent TTIE as floats
             #if key.lower().startswith("ttie"):
             #    value += "."
-            
-            contents += f" {key.upper()} = {value}\n"            
+
+            contents += f" {key.upper()} = {value}\n"
             #if key.lower() == "obscont":
             #    contents += f" REJECTCONT = 0.300000\n"
-                
+
             if key.lower() == "ntie":
                 # do all the ties now.
                 contents += f" TYPETIE = {ferre_kwds['TYPETIE']}\n"
@@ -600,7 +602,7 @@ def format_ferre_control_keywords(ferre_kwds: dict, n_obj) -> str:
                             others.append(k)
                     others = sorted(others)
                     for k in others:
-                        contents += f" {k.upper()} = {ferre_kwds[k]}.\n"                    
+                        contents += f" {k.upper()} = {ferre_kwds[k]}.\n"
 
     contents += " /\n" # without at least one \n, FERRE won't run
     return contents
@@ -818,7 +820,7 @@ def validate_initial_and_frozen_parameters(
 ):
 
     N = len(initial_parameters)
-    
+
     ferre_label_names = headers["LABEL"]
 
     mid_point = grid_mid_point(headers)
@@ -838,13 +840,13 @@ def validate_initial_and_frozen_parameters(
                         log.debug(message)
                         warning_messages.append(message)
                 continue
-        
+
             else:
                 if ferre_label_name not in ferre_label_names:
                     if ferre_label_name not in recognized_parameter_names:
                         message = f"Ignoring initial parameter '{ferre_label_name}' as it is not in {ferre_label_names}"
                         if message not in warning_messages:
-                            log.debug(message)      
+                            log.debug(message)
                             warning_messages.append(message)
                     continue
 
@@ -900,18 +902,18 @@ def clip_initial_guess(initial_guess, headers, transforms=None, percent_epsilon=
     :param initial_guess:
         A dictionary containing the input initial guess, with parameter names (arbitrary) as keys
         and values as the initial guess for that parameter.
-    
+
     :param headers:
         The FERRE grid headers.
-    
+
     :param transforms: [optional]
         A dictionary containing parameter names (as per `initial_guess`) as keys, and the actual
         FERRE grid label that corresponds to as the values. If `None` is given then `TRANSLATE_LABELS`
         will be used.
-    
+
     :param percent_epsilon: [optional]
         The percentage of the grid step size to clip the initial guess by.
-    
+
     :param decimals: [optional]
         The number of decimal places to round the clipped initial guess to.
     """
@@ -921,7 +923,7 @@ def clip_initial_guess(initial_guess, headers, transforms=None, percent_epsilon=
     if decimals is not None:
         lower_limits = np.round(lower_limits, decimals)
         upper_limits = np.round(upper_limits, decimals)
-    
+
     clipped_initial_guess = {}
     transforms = transforms or TRANSLATE_LABELS
     for parameter, value in initial_guess.items():
@@ -942,14 +944,14 @@ def clip_initial_guess(initial_guess, headers, transforms=None, percent_epsilon=
                 clipped_initial_guess[parameter] = value
                 continue
 
-            else:    
+            else:
                 clipped_value = np.clip(value, lower_limits[index], upper_limits[index])
 
                 if decimals is not None:
                     clipped_value = np.round(clipped_value, decimals)
                 clipped_initial_guess[parameter] = clipped_value
     return clipped_initial_guess
-            
+
 
 
 def wavelength_array(header):
@@ -1084,7 +1086,7 @@ def parse_ferre_output(dir, stdout, stderr, control_file_basename="input.nml"):
     for line in stdout.split("\n"):
         if "f e r r e" in line:
             meta["ferre_version"] = line.strip().split()[-1]
-    
+
 
     return (n_done, n_errors, control_kwds, meta)
 
@@ -1170,7 +1172,7 @@ def read_file_with_name_and_data(path, input_names, n_data_columns=None, dtype=f
     if n_data_columns is None:
         with open(path, "r") as fp:
             n_data_columns = len(fp.readline().strip().split()) - 1
-    
+
     data = np.atleast_2d(np.loadtxt(path, usecols=range(1, 1 + n_data_columns), dtype=dtype))
     if input_names is None:
         return (names, data)
@@ -1201,7 +1203,7 @@ def read_output_parameter_file(pwd, control_kwds, input_names):
 
 
 def _read_output_parameter_file(path, n_dimensions, full_covariance, input_names):
-    
+
     names = np.atleast_1d(np.loadtxt(path, usecols=(0,), dtype=str))
 
     N_cols = 2 * n_dimensions + 3
@@ -1243,9 +1245,9 @@ def sort_data_as_per_input_names(input_names, unsorted_names, unsorted_data):
 
     data = np.nan * np.ones((N, D), dtype=float)
     intersect, input_index, output_index = np.intersect1d(
-        input_names, 
+        input_names,
         unsorted_names,
-        assume_unique=False, 
+        assume_unique=False,
         return_indices=True
     )
     data[input_index] = unsorted_data[output_index]
@@ -1263,11 +1265,11 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
     :param stdout: (optional)
         The standard output from FERRE.
     """
-    
+
     for path in sorted(glob(f"{stdout_path_prefix}*"))[::-1]:
         with open(path, "r") as fp:
             stdout = fp.read()
-        
+
         headers = list(re.finditer(r"-{65}\s+f e r r e", stdout))
 
         for h, header in enumerate(headers):
@@ -1278,8 +1280,8 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
             except:
                 process_stdout = stdout[si:]
             else:
-                process_stdout = stdout[si:ei]    
-            
+                process_stdout = stdout[si:ei]
+
             relative_input_nml_path = re.findall(r"-{65}\n\s+(?P<rel_path>[\w|\_|/|\.]+).nml\s+", process_stdout)[0] + ".nml"
 
             if relative_path is not None:
@@ -1303,7 +1305,7 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
             for i in range(n_items):
                 ei = n_per_thread + (1 if n_mod > i else 0)
                 expected_indices[i, :ei] = range(si, si + ei)
-                si += ei        
+                si += ei
 
             # Find the obvious examples first.
             elapsed_time_pattern = r"ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
@@ -1330,7 +1332,7 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
                     t_elapsed_per_thread[i, j] = float(elapsed_time)
                 else:
                     # This usually happens when it is the last of an assigned set
-                    unassigned.append((si, ei, elapsed_time))            
+                    unassigned.append((si, ei, elapsed_time))
 
             col = np.searchsorted(~np.isfinite(t_elapsed_per_thread[-1]), True)
             row = np.searchsorted(~np.isfinite(t_elapsed_per_thread[:, col]), True)
@@ -1346,7 +1348,7 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
             for i in range(n_obj):
                 (j, ), (k, ) = np.where(expected_indices == i)
 
-                # Subtract the load time from the first time per thread, or the time since last spectrum 
+                # Subtract the load time from the first time per thread, or the time since last spectrum
                 offset = t_elapsed_per_thread[j, k - 1] if k > 0 else t_load_grid
                 t_elapsed_per_spectrum[i] = t_elapsed_per_thread[j, k] - offset
 

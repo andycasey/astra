@@ -7,6 +7,12 @@ from astra.models.apogee import (
 from astra.models.boss import BossVisitSpectrum
 from astra.models.mwm import BossCombinedSpectrum
 from astra.models.corv import Corv
+from astra.models.arjl import (
+    ARJLTHRestFrameVisitSpectrum,
+    ARJLDDRestFrameVisitSpectrum,
+    ARJLTHVisitSpectrum,
+    ARJLDDVisitSpectrum,
+)
 
 """
 from astra.models.apogeenet import ApogeeNet

@@ -185,16 +185,17 @@ def _pre_process_ferre(
 
             else:
                 # TODO: move this to the ASPCAP coarse/stellar parameter section (before continuum norm).
-                flux, e_flux = inflate_errors_at_bad_pixels(
-                    flux,
-                    e_flux,
-                    pixel_flags,
-                    skyline_sigma_multiplier=skyline_sigma_multiplier,
-                    bad_pixel_flux_value=bad_pixel_flux_value,
-                    bad_pixel_error_value=bad_pixel_error_value,
-                    spike_threshold_to_inflate_uncertainty=spike_threshold_to_inflate_uncertainty,
-                    min_sigma_value=min_sigma_value,
-                )
+                if not spectrum._meta.name.startswith("arjl"):
+                    flux, e_flux = inflate_errors_at_bad_pixels(
+                        flux,
+                        e_flux,
+                        pixel_flags,
+                        skyline_sigma_multiplier=skyline_sigma_multiplier,
+                        bad_pixel_flux_value=bad_pixel_flux_value,
+                        bad_pixel_error_value=bad_pixel_error_value,
+                        spike_threshold_to_inflate_uncertainty=spike_threshold_to_inflate_uncertainty,
+                        min_sigma_value=min_sigma_value,
+                    )
 
 
             # Restrict by the number of bad pixels otherwise FERRE gets into trouble.
@@ -465,7 +466,7 @@ def _post_process_ferre(input_nml_path, pwd=None, skip_pixel_arrays=False, **kwa
 
     # Create some boolean flags.
     header_path = control_kwds["SYNTHFILE(1)"]
-    if not os.path.exists(header_path):
+    if not os.path.exists(header_path) or not header_path.startswith("/"):
         header_path = os.path.join(pwd, header_path)
 
     headers, *segment_headers = utils.read_ferre_headers(expand_path(header_path))

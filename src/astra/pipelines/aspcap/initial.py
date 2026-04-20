@@ -1,9 +1,30 @@
+import numpy as np
 from astra import __version__
 from astra.utils import version_string_to_integer
 from astra.models.apogeenet import ApogeeNet
 from astra.models.aspcap import FerreCoarse
-from astra.pipelines.aspcap.utils import approximate_log10_microturbulence 
+from astra.pipelines.aspcap.utils import approximate_log10_microturbulence
 from astropy.io import fits
+
+def get_initial_arjl_guesses(spectra):
+    for spectrum in spectra:
+        yield (
+            spectrum,
+            dict(
+                teff=spectrum.dr17_teff,
+                logg=spectrum.dr17_logg,
+                m_h=spectrum.dr17_x_h if np.isfinite(spectrum.dr17_x_h) else 0.0,
+                log10_v_micro=approximate_log10_microturbulence(spectrum.dr17_logg),
+                alpha_m=0.0,
+                log10_v_sini=np.log10(spectrum.dr17_vsini) if np.isfinite(np.log10(spectrum.dr17_vsini)) else 1.0,
+                c_m=0.0,
+                n_m=0.0,
+                initial_flags=0,
+                mean_fiber=None,
+                telescope=None,
+            )
+        )
+
 
 def get_initial_guesses(spectra):
     """
@@ -12,11 +33,11 @@ def get_initial_guesses(spectra):
     :param spectra:
         An iterable of spectra.
     """
-    
+
     spectra_dict = {s.spectrum_pk: s for s in spectra}
 
     functions = (
-        get_initial_guesses_from_apogeenet, 
+        get_initial_guesses_from_apogeenet,
         get_initial_guess_from_gaia_xp_zhang_2023
     )
     for fun in functions:
@@ -29,7 +50,7 @@ def get_effective_fiber(spectrum):
         if fiber is not None:
             return fiber
 
-    return fits.getval(spectrum.absolute_path, "MEANFIB")    
+    return fits.getval(spectrum.absolute_path, "MEANFIB")
 
 def get_initial_defaults(spectrum, logg=None):
     kwds = {
@@ -38,7 +59,7 @@ def get_initial_defaults(spectrum, logg=None):
         "alpha_m": 0.0,
         "log10_v_sini": 1.0,
         "c_m": 0.0,
-        "n_m": 0.0, 
+        "n_m": 0.0,
     }
     if logg is not None:
         kwds["log10_v_micro"] = approximate_log10_microturbulence(logg)
@@ -99,7 +120,7 @@ def get_initial_guesses_from_apogeenet(spectra_pk_dict):
                 "alpha_m": 0.0,
                 "log10_v_sini": 1.0,
                 "c_m": 0.0,
-                "n_m": 0.0, 
+                "n_m": 0.0,
             }
             initial_guess["log10_v_micro"] = approximate_log10_microturbulence(initial_guess["logg"])
             yield (spectrum, initial_guess)

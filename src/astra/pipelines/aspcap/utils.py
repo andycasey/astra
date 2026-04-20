@@ -50,7 +50,7 @@ ABUNDANCE_CONTROLS = {
     },
     "Ce": {
         "INDV_LABEL": ("METALS",),
-        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],  
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
     },
     #CI
     "C_1": {
@@ -61,7 +61,7 @@ ABUNDANCE_CONTROLS = {
     },
     "C_12_13": {
         "INDV_LABEL": ("C", ),
-    }, 
+    },
     "CN": {
         "INDV_LABEL": (
             "C",
@@ -157,7 +157,7 @@ def get_input_nml_paths(parent_dir, stage):
 def get_species_label_references():
     species_label_reference = {}
     for species, controls in ABUNDANCE_CONTROLS.items():
-        if species == "CN": 
+        if species == "CN":
             continue
 
         label, = controls["INDV_LABEL"]
@@ -235,7 +235,7 @@ def yield_suitable_grids(
     teff,
     logg,
     m_h,
-    telescope, 
+    telescope,
     strict=True,
     **kwargs
 ):
@@ -262,7 +262,7 @@ def yield_suitable_grids(
         A generator that yields two-length tuples containing header path, and metadata..
     """
 
-    if mean_fiber is not None and np.isfinite(mean_fiber):  
+    if mean_fiber is not None and np.isfinite(mean_fiber):
         lsf_grid = get_lsf_grid_name(int(np.round(mean_fiber)))
 
         #point = np.array([m_h, logg, teff])
@@ -292,12 +292,12 @@ def yield_suitable_grids(
                 and (
                     (telescope == meta["lsf_telescope_model"])
                     |   (
-                            (telescope == "apo1m") 
+                            (telescope == "apo1m")
                         &   (meta["lsf_telescope_model"] == "apo25m")
                         )
                     )
                 )
-            ):                
+            ):
                 # We will take the RV parameters as the initial parameters.
                 # Check to see if they are within bounds of the grid.
                 if strict:
@@ -307,6 +307,32 @@ def yield_suitable_grids(
                     # Only require temperature to be within the limits.
                     if (upper_limits[-1] >= teff >= lower_limits[-1]):
                         yield (header_path, meta, headers)
+
+    else:
+        # Ignore constraints on LSF and telescope if no mean fiber information is available
+        point = np.array([logg, teff])
+        P = point.size
+
+        for header_path, headers in all_headers.items():
+            meta = parse_header_path(header_path)
+            lower_limits, upper_limits = (headers["LLIMITS"], headers["ULIMITS"])
+            # print(meta["lsf"], lsf_grid, telescope, meta["lsf_telescope_model"], header_path)
+            # Match star to LSF fiber number model (a, b, c, d) and telescope model (apo25m/lco25m).
+            # TODO: This is a very APOGEE-specific thing and perhaps should be moved elsewhere.
+            # Special case to deal with Kurucz photospheres.
+            if strict:
+                if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
+                    yield (header_path, meta, headers)
+            else:
+                # Only require temperature to be within the limits.
+                if (upper_limits[-1] >= teff >= lower_limits[-1]):
+                    yield (header_path, meta, headers)
+
+            #if (
+            #    meta["lsf"] != lsf_grid and not meta["lsf"].startswith("combo")
+            #) or telescope != meta["lsf_telescope_model"]:
+            #    continue
+
 
 
 def get_lsf_grid_name(fibre_number):

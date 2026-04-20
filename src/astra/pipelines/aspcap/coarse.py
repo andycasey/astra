@@ -28,7 +28,7 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
     penalized_rchi2 = 0 + result.rchi2
     if result.teff < 3900 and "GK_200921" in result.header_path:
         penalized_rchi2 *= cool_star_in_gk_grid_multiplier
-        
+
     if result.flag_logg_grid_edge_warn:
         penalized_rchi2 *= warn_multiplier
 
@@ -44,15 +44,15 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
     # Add penalization terms for if FERRE failed.
     if result.flag_teff_ferre_fail:
         penalized_rchi2 *= fail_multiplier
-    
+
     if result.flag_logg_ferre_fail:
         penalized_rchi2 *= fail_multiplier
-    
+
     if not np.isfinite(penalized_rchi2):
         penalized_rchi2 = np.inf
     return penalized_rchi2
 
-        
+
 def plan_coarse_stellar_parameters_stage(
     spectra: Iterable[Spectrum],
     parent_dir: str,
@@ -65,8 +65,6 @@ def plan_coarse_stellar_parameters_stage(
     Plan a set of FERRE executions for a coarse stellar parameter run.
     """
 
-    if initial_guess_callable is None:
-        initial_guess_callable = get_initial_guesses
 
     all_headers = {}
     for header_path in read_ferre_header_paths(header_paths):
@@ -100,7 +98,7 @@ def plan_coarse_stellar_parameters_stage(
                     header_path=header_path,
                     frozen_parameters=frozen_parameters,
                     initial_teff=initial_guess["teff"],
-                    initial_logg=initial_guess["logg"], 
+                    initial_logg=initial_guess["logg"],
                     initial_log10_v_sini=initial_guess["log10_v_sini"],
                     initial_log10_v_micro=initial_guess["log10_v_micro"],
                     initial_m_h=initial_guess["m_h"],
@@ -113,14 +111,14 @@ def plan_coarse_stellar_parameters_stage(
 
                 all_kwds.append(kwds)
                 n_initial_guesses += 1
-            
+
             if n_initial_guesses > 0:
                 break
-        
+
         else:
             # No suitable initial guess has been found.
             # Send it to all grids, at the grid centers.
-            initial_flags = FerreCoarse(flag_initial_guess_at_grid_center=True).initial_flags 
+            initial_flags = FerreCoarse(flag_initial_guess_at_grid_center=True).initial_flags
             assert initial_flags > 0, "Have the initial flag definitions changed for `astra.models.aspcap.FerreCoarse`?"
 
             # Check if all the nput initial guess values are finite.
@@ -148,10 +146,10 @@ def plan_coarse_stellar_parameters_stage(
                             adjusted_initial_guess[translated_label] = np.clip(adjusted_initial_guess[translated_label], lower + 0.05 * ptp, upper - 0.05 * ptp)
 
                         break
-                    
+
                 # Now yield results given the adjusted guess
                 for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **adjusted_initial_guess):
-                    spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)                    
+                    spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)
                     initial_guess = clip_initial_guess(adjusted_initial_guess, headers)
 
                     frozen_parameters = dict()
@@ -165,7 +163,7 @@ def plan_coarse_stellar_parameters_stage(
                         header_path=header_path,
                         frozen_parameters=frozen_parameters,
                         initial_teff=initial_guess["teff"],
-                        initial_logg=initial_guess["logg"], 
+                        initial_logg=initial_guess["logg"],
                         initial_log10_v_sini=initial_guess["log10_v_sini"],
                         initial_log10_v_micro=initial_guess["log10_v_micro"],
                         initial_m_h=initial_guess["m_h"],
@@ -186,7 +184,7 @@ def plan_coarse_stellar_parameters_stage(
                     centered_initial_guess.update(teff=teff, logg=logg)
 
                     for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **centered_initial_guess):
-                        spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)                    
+                        spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)
                         initial_guess = clip_initial_guess(centered_initial_guess, headers)
 
                         frozen_parameters = dict()
@@ -200,7 +198,7 @@ def plan_coarse_stellar_parameters_stage(
                             header_path=header_path,
                             frozen_parameters=frozen_parameters,
                             initial_teff=initial_guess["teff"],
-                            initial_logg=initial_guess["logg"], 
+                            initial_logg=initial_guess["logg"],
                             initial_log10_v_sini=initial_guess["log10_v_sini"],
                             initial_log10_v_micro=initial_guess["log10_v_micro"],
                             initial_m_h=initial_guess["m_h"],
@@ -212,7 +210,7 @@ def plan_coarse_stellar_parameters_stage(
                         )
 
                         all_kwds.append(kwds)
-    
+
     # Anything that has no suitable initial guess?
     spectra_with_no_initial_guess = [
         s for s in spectra \
@@ -268,5 +266,3 @@ def read_ferre_header_paths(header_paths):
             with open(expand_path(header_paths), "r") as fp:
                 header_paths = [line.strip() for line in fp]
     return header_paths
-            
-

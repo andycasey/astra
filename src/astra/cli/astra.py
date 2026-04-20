@@ -352,7 +352,7 @@ def create(
             Product.astraAllStarAstroNNDist: (
                 create_all_star_product,
                 {
-                    "pipeline_model": "astronn_dist.AstroNNDist",
+                    "pipeline_model": "astronn_dist.AstroNNdist",
                     "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
                     "overwrite": overwrite
                 }

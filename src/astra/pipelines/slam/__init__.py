@@ -206,6 +206,13 @@ def slam(
             continue
 
         try:
+            if spectrum.flux.size == 0:
+                continue
+        except:
+            continue
+
+
+        try:
             if isinstance(spectrum, BossCombinedSpectrum):
                 wave = spectrum.wavelength
             else:
@@ -220,6 +227,7 @@ def slam(
         used_spectra.append(spectrum)
 
     if not used_spectra:
+        print(f"Returning!")
         return
 
     # --- Phase 2: Vectorized batch rebinning ---
@@ -228,7 +236,7 @@ def slam(
 
     # --- Phase 3: Process in chunks (normalize -> predict) ---
     n_total = len(used_spectra)
-    for start in range(0, n_total, batch_size):
+    for start in tqdm(range(0, n_total, batch_size), desc="Processing chunks"):
         end = min(start + batch_size, n_total)
         chunk_flux = flux_boss[start:end]
         chunk_ivar = ivar_boss[start:end]

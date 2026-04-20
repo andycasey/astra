@@ -74,7 +74,7 @@ with DAG(
         (
             BashOperator(
                 task_id="visit",
-                bash_command='astra srun bossnet boss.BossVisitSpectrum --nodes 1 --procs 64'
+                bash_command='astra srun bossnet boss.BossVisitSpectrum --nodes 1 --procs 4'
             )
         ) >> (
             BashOperator(

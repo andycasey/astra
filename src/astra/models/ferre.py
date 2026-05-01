@@ -377,7 +377,7 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     @cached_property
     def ferre_e_flux(self):
         return self._get_input_pixel_array("../e_flux.input")
-
+    
     #source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     #spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreStellarParameters, column_name="upstream_pk", index=True)

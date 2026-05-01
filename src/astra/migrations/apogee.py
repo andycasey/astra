@@ -908,7 +908,7 @@ def parse_apogee_visit_spectrum_data(q, source_keys, queue, description, k=1000,
     if total > 0:
         queue.put(dict(description=description, total=total, completed=0))
         # Keys to remove (source-only, except catalogid which is kept for linking)
-        keys_to_remove = set(source_keys) - {"catalogid", "sdss_id"}
+        keys_to_remove = set(source_keys) - {"sdss_id"}
         for i, r in enumerate(q.iterator()):
             # Add release and transform fields
             r.update(

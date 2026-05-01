@@ -433,6 +433,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
     #> Identifiers
     star_pk = BigIntegerField(null=True, unique=True)
+    catalogid = BigIntegerField(index=True, null=True)    
     spectrum_pk = ForeignKeyField(
         Spectrum,
         null=True,

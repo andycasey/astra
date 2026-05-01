@@ -1191,6 +1191,7 @@ def init(
 
     init_model_packages = (
         "apogee",
+        "aspcap",
         "boss",
         "bossnet",
         "apogeenet",

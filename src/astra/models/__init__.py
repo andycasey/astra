@@ -13,7 +13,7 @@ from astra.models.arjl import (
     ARJLTHVisitSpectrum,
     ARJLDDVisitSpectrum,
 )
-
+from astra.models.aspcap import ASPCAP
 """
 from astra.models.apogeenet import ApogeeNet
 from astra.models.apogeenet_v2 import ApogeeNetV2

@@ -941,7 +941,8 @@ def parse_apogee_coadd_spectrum_data(q, source_keys, queue, description, k=1000,
     if total > 0:
         queue.put(dict(description=description, total=total, completed=0))
         # Keys to remove (source-only, except catalogid/sdss_id/healpix which are kept)
-        keys_to_remove = set(source_keys) - {"catalogid", "sdss_id", "healpix"}
+        #keys_to_remove = set(source_keys) - {"catalogid", "sdss_id", "healpix"}
+        keys_to_remove = source_keys
         for i, r in enumerate(q.iterator()):
             # Remove source-only keys
             for key in keys_to_remove:

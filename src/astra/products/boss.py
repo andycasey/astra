@@ -1,5 +1,6 @@
 """Functions to create BOSS-related products."""
 
+import concurrent.futures
 import numpy as np
 from peewee import JOIN, fn
 from astra.models.boss import BossVisitSpectrum
@@ -8,7 +9,9 @@ from astra.specutils.resampling import resample, pixel_weighted_spectrum
 from astra.specutils.continuum.nmf.boss import BossNMFContinuum
 
 from astra.migrations.utils import enumerate_new_spectrum_pks
+from astra.models.base import database
 
+from astra.fields import BasePixelArrayAccessor
 from astra import __version__
 from astra.utils import log
 from astra.products.utils import (
@@ -18,16 +21,33 @@ from astra.products.utils import (
 
 boss_continuum_model = BossNMFContinuum()
 
-def include_boss_spectrum_in_coadd(source, spectrum):
+# Number of threads used to overlap NFS reads of per-visit FITS files.
+_PIXEL_PREFETCH_WORKERS = 8
+
+
+def _prefetch_visit_pixel_data(spectrum):
+    """Force the PixelArrayAccessorFITS load so all pixel fields for this
+    spectrum get cached on the instance. Intended to be called concurrently
+    across visits to overlap NFS roundtrips."""
+    try:
+        # Touching any one pixel field opens the FITS once and populates
+        # __pixel_data__ with every pixel field in one go.
+        _ = spectrum.flux
+    except Exception:
+        log.exception(f"Failed to prefetch pixel data for {spectrum}")
+    return spectrum
+
+
+def include_boss_spectrum_in_coadd(spectrum, is_mwm_wd):
     return (
         np.isfinite(spectrum.snr)
     &   (spectrum.snr > 3)
-    &   ((spectrum.xcsao_rxc > 6) | ("mwm_wd" in source.sdss5_cartons["program"]))
+    &   ((spectrum.xcsao_rxc > 6) | is_mwm_wd)
     &   (spectrum.zwarning_flags <= 0)
     )
 
 
-def include_boss_spectrum_in_rv_calculation(source, spectrum):
+def include_boss_spectrum_in_rv_calculation(spectrum):
     return (
         np.isfinite(spectrum.xcsao_v_rad)
     &   (spectrum.xcsao_rxc > 6)
@@ -53,16 +73,41 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
 
     visit_fields = get_fields_and_pixel_arrays((BossVisitSpectrum, ))
 
+    spectra = list(q)
+
+    # Prefetch per-visit pixel data concurrently. Each visit lives in its own
+    # FITS file on NFS; opening them serially in the main loop dominates
+    # t_boss_prepare. We let the accessor cache the result on each instance.
+    if spectra:
+        n_workers = min(_PIXEL_PREFETCH_WORKERS, len(spectra))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+            list(pool.map(_prefetch_visit_pixel_data, spectra))
+
+    # Hoist the carton lookup out of the per-visit loop. `source.sdss5_cartons`
+    # walks the target-bits buffer in Python and runs np.searchsorted, so it
+    # is moderately expensive to repeat per visit.
+    try:
+        is_mwm_wd = "mwm_wd" in source.sdss5_cartons["program"]
+    except Exception:
+        is_mwm_wd = False
+
     visits = []
     v_rads, e_v_rads, in_stack = ([], [], [])
-    for spectrum in list(q):
+    for spectrum in spectra:
         visit = {}
+        spectrum_data = spectrum.__data__
         for name, field in visit_fields.items():
             if name in ("pk", "v_astra", "source", "modified", "created"):
                 continue
 
             try:
-                value = getattr(spectrum, name)
+                if isinstance(field, BasePixelArrayAccessor):
+                    # Pixel arrays load lazily from disk via the accessor.
+                    value = getattr(spectrum, name)
+                elif name in spectrum_data:
+                    value = spectrum_data[name]
+                else:
+                    value = getattr(spectrum, name)
             except:
                 log.exception(f"Exception trying to access {name} on source {source} {telescope} {run2ds} {spectrum.__data__}")
                 raise
@@ -70,8 +115,8 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
                 value = get_fill_value(field, fill_values)
             visit[name] = value
 
-        in_stack.append(include_boss_spectrum_in_coadd(source, spectrum))
-        if include_boss_spectrum_in_rv_calculation(source, spectrum):
+        in_stack.append(include_boss_spectrum_in_coadd(spectrum, is_mwm_wd))
+        if include_boss_spectrum_in_rv_calculation(spectrum):
             v_rads.append(spectrum.xcsao_v_rad)
             e_v_rads.append(spectrum.xcsao_e_v_rad)
 
@@ -199,37 +244,38 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
     for spectrum_pk, spectrum in enumerate_new_spectrum_pks(save_spectra):
         spectrum.spectrum_pk = spectrum_pk
 
-    if coadd_spectrum is not None:
-        (
-            BossCombinedSpectrum
-            .delete()
-            .where(
-                (BossCombinedSpectrum.sdss_id == source.sdss_id)
-            &   (BossCombinedSpectrum.telescope == coadd_spectrum.telescope)
-            &   (BossCombinedSpectrum.run2d == coadd_spectrum.run2d)
-            &   (BossCombinedSpectrum.release == coadd_spectrum.release)
-            &   (BossCombinedSpectrum.v_astra == coadd_spectrum.v_astra)
+    with database.atomic():
+        if coadd_spectrum is not None:
+            (
+                BossCombinedSpectrum
+                .delete()
+                .where(
+                    (BossCombinedSpectrum.sdss_id == source.sdss_id)
+                &   (BossCombinedSpectrum.telescope == coadd_spectrum.telescope)
+                &   (BossCombinedSpectrum.run2d == coadd_spectrum.run2d)
+                &   (BossCombinedSpectrum.release == coadd_spectrum.release)
+                &   (BossCombinedSpectrum.v_astra == coadd_spectrum.v_astra)
+                )
+                .execute()
             )
-            .execute()
-        )
-        coadd_spectrum.save()
-    if visit_spectra:
-        (
-            BossRestFrameVisitSpectrum
-            .delete()
-            .where(
-                (BossRestFrameVisitSpectrum.drp_spectrum_pk.in_([v.drp_spectrum_pk for v in visit_spectra]))
-            &   (BossRestFrameVisitSpectrum.v_astra == visit_spectra[0].v_astra)
+            coadd_spectrum.save()
+        if visit_spectra:
+            (
+                BossRestFrameVisitSpectrum
+                .delete()
+                .where(
+                    (BossRestFrameVisitSpectrum.drp_spectrum_pk.in_([v.drp_spectrum_pk for v in visit_spectra]))
+                &   (BossRestFrameVisitSpectrum.v_astra == visit_spectra[0].v_astra)
+                )
+                .execute()
             )
-            .execute()
-        )
-        try:
-            BossRestFrameVisitSpectrum.bulk_create(visit_spectra)
-        except:
-            print(f"v_astra match: {visit_spectra[0].v_astra}")
-            print([v.drp_spectrum_pk for v in visit_spectra])
-            for v in visit_spectra:
-                print(v.__data__)
+            try:
+                BossRestFrameVisitSpectrum.bulk_create(visit_spectra)
+            except:
+                print(f"v_astra match: {visit_spectra[0].v_astra}")
+                print([v.drp_spectrum_pk for v in visit_spectra])
+                for v in visit_spectra:
+                    print(v.__data__)
 
 
     return (coadd_spectrum, visit_spectra)

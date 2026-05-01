@@ -9,9 +9,11 @@ from astra.specutils.resampling import resample, pixel_weighted_spectrum
 from astra.specutils.continuum.nmf.apogee import ApogeeNMFContinuum
 
 from astra.migrations.utils import enumerate_new_spectrum_pks
+from astra.models.base import database
 from astra.models.nmf_rectify import NMFRectify
 
 from astra.models.mwm import ApogeeCombinedSpectrum, ApogeeRestFrameVisitSpectrum
+from astra.fields import BasePixelArrayAccessor
 from astra import __version__
 from astra.utils import log
 from astra.products.utils import (
@@ -61,12 +63,19 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, observa
         if result is None:
             return (None, None)
 
+        result_data = getattr(result, "__data__", None) or {}
         for name, field in coadd_fields.items():
             if name in ("spectrum_pk", "pk", "v_astra", "source", "modified", "created"):
                 continue
 
             try:
-                value = getattr(result, name)
+                if isinstance(field, BasePixelArrayAccessor):
+                    # Pixel arrays load lazily from disk via the accessor.
+                    value = getattr(result, name)
+                elif name in result_data:
+                    value = result_data[name]
+                else:
+                    value = getattr(result, name)
             except FileNotFoundError:
                 break
             except:
@@ -128,20 +137,29 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, observa
     visit_data = []
     visit_fields = get_fields_and_pixel_arrays((ApogeeRestFrameVisitSpectrum, ))
     for spectrum in q.iterator():
+        spectrum_data = getattr(spectrum, "__data__", None) or {}
+        in_apstar_pk = spectrum_data.get("in_apstar_pk", getattr(spectrum, "in_apstar_pk", None))
         visit = {
-            "in_stack": getattr(spectrum, "in_apstar_pk", None) is not None,
-            "in_apstar_pk": getattr(spectrum, "in_apstar_pk", None),
+            "in_stack": in_apstar_pk is not None,
+            "in_apstar_pk": in_apstar_pk,
             "sdss_id": sdss_id,
         }
         for name, field in visit_fields.items():
             if name in ("pk", "v_astra", "modified", "created", "nmf_rchi2", "nmf_rectified_model_flux", "continuum", "nmf_flags") or name in visit:
                 continue
             elif name == "date_obs":
-                value = spectrum.date_obs.isoformat()
+                value = spectrum_data.get("date_obs")
+                if value is not None:
+                    value = value.isoformat()
             elif name == "sdss_id":
                 value = sdss_id
             elif name == "healpix":
                 value = source.healpix
+            elif isinstance(field, BasePixelArrayAccessor):
+                # Pixel arrays load lazily from disk via the accessor.
+                value = getattr(spectrum, name)
+            elif name in spectrum_data:
+                value = spectrum_data[name]
             else:
                 value = getattr(spectrum, name)
 
@@ -211,34 +229,35 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, observa
     for spectrum_pk, spectrum in enumerate_new_spectrum_pks([coadd_spectrum] + visit_spectra):
         spectrum.spectrum_pk = spectrum_pk
 
-    (
-        ApogeeCombinedSpectrum
-        .delete()
-        .where(
-            (ApogeeCombinedSpectrum.sdss_id == source.sdss_id)
-        &   (ApogeeCombinedSpectrum.telescope == coadd_spectrum.telescope)
-        &   (ApogeeCombinedSpectrum.apred == coadd_spectrum.apred)
-        &   (ApogeeCombinedSpectrum.release == coadd_spectrum.release)
-        &   (ApogeeCombinedSpectrum.v_astra == coadd_spectrum.v_astra)
-        )
-        .execute()
-    )
-    coadd_spectrum.save()
-    if visit_spectra:
-        # Remove any existing entries before we create this one.
-        releases = tuple(set([s.release for s in visit_spectra]))
+    with database.atomic():
         (
-            ApogeeRestFrameVisitSpectrum
+            ApogeeCombinedSpectrum
             .delete()
             .where(
-                (ApogeeRestFrameVisitSpectrum.sdss_id == source.sdss_id)
-            &   (ApogeeRestFrameVisitSpectrum.telescope == visit_spectra[0].telescope)
-            &   (ApogeeRestFrameVisitSpectrum.apred.in_(apreds))
-            &   (ApogeeRestFrameVisitSpectrum.release.in_(releases))
-            &   (ApogeeRestFrameVisitSpectrum.v_astra == visit_spectra[0].v_astra)
+                (ApogeeCombinedSpectrum.sdss_id == source.sdss_id)
+            &   (ApogeeCombinedSpectrum.telescope == coadd_spectrum.telescope)
+            &   (ApogeeCombinedSpectrum.apred == coadd_spectrum.apred)
+            &   (ApogeeCombinedSpectrum.release == coadd_spectrum.release)
+            &   (ApogeeCombinedSpectrum.v_astra == coadd_spectrum.v_astra)
             )
             .execute()
         )
-        ApogeeRestFrameVisitSpectrum.bulk_create(visit_spectra)
+        coadd_spectrum.save()
+        if visit_spectra:
+            # Remove any existing entries before we create this one.
+            releases = tuple(set([s.release for s in visit_spectra]))
+            (
+                ApogeeRestFrameVisitSpectrum
+                .delete()
+                .where(
+                    (ApogeeRestFrameVisitSpectrum.sdss_id == source.sdss_id)
+                &   (ApogeeRestFrameVisitSpectrum.telescope == visit_spectra[0].telescope)
+                &   (ApogeeRestFrameVisitSpectrum.apred.in_(apreds))
+                &   (ApogeeRestFrameVisitSpectrum.release.in_(releases))
+                &   (ApogeeRestFrameVisitSpectrum.v_astra == visit_spectra[0].v_astra)
+                )
+                .execute()
+            )
+            ApogeeRestFrameVisitSpectrum.bulk_create(visit_spectra)
 
     return (coadd_spectrum, visit_spectra)

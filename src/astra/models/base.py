@@ -36,6 +36,9 @@ from astra.utils import log, get_config_paths, expand_path
 BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
+_CATEGORY_HEADERS_CACHE = {}
+_CATEGORY_COMMENTS_CACHE = {}
+
 
 class ResilientDatabase(object):
     def __init__(self, *args, **kwargs):
@@ -257,6 +260,9 @@ class BaseModel(Model):
 
         #> New category header
         """
+        cached = _CATEGORY_HEADERS_CACHE.get(cls)
+        if cached is not None:
+            return cached
 
         pattern = r'\s{4}#>\s*(.+)\n\s{4}([\w|\d|_]+)\s*='
         source_code = getsource(cls)
@@ -269,19 +275,27 @@ class BaseModel(Model):
                     f"Found category header '{header}', starting above '{field_name}' in {cls}, "
                     f"but {cls}.{field_name} is not an attribute of type `peewee.Field`."
                 )
-        return tuple(category_headers)
+        result = tuple(category_headers)
+        _CATEGORY_HEADERS_CACHE[cls] = result
+        return result
 
 
     @classmethod
     @property
     def category_comments(cls):
+        cached = _CATEGORY_COMMENTS_CACHE.get(cls)
+        if cached is not None:
+            return cached
+
         pattern = r'\s{4}([\w|\d|_]+)\s*=.+\n\s{4}#<\s*(.+)'
         source_code = getsource(cls)
         comments = []
         for field_name, comment in re.findall(pattern, source_code):
             if hasattr(cls, field_name) and isinstance(getattr(cls, field_name), Field):
                 comments.append((comment, field_name))
-        return tuple(comments)
+        result = tuple(comments)
+        _CATEGORY_COMMENTS_CACHE[cls] = result
+        return result
 
     @property
     def absolute_path(self):

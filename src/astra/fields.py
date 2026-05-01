@@ -268,7 +268,15 @@ class LogLambdaArrayAccessor(BasePixelArrayAccessor):
             try:
                 return instance.__pixel_data__[self.name]
             except KeyError:
-                instance.__pixel_data__[self.name] = 10**(self.crval + self.cdelt * np.arange(self.naxis))
+                # The dispersion grid is fully determined by (crval, cdelt, naxis)
+                # which are set on the accessor at class definition time, so it is
+                # safe (and much cheaper) to compute it once and share it across
+                # every instance of this model.
+                shared = getattr(self, "_shared_wavelength", None)
+                if shared is None:
+                    shared = 10**(self.crval + self.cdelt * np.arange(self.naxis))
+                    self._shared_wavelength = shared
+                instance.__pixel_data__[self.name] = shared
             finally:
                 return instance.__pixel_data__[self.name]
 

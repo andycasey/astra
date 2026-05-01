@@ -152,11 +152,14 @@ def create_source_primary_hdu_from_cards(source, cards, original_names, upper=Fa
 
     s = lambda v: v.upper() if upper else v
 
-    # Add checksums.
-    hdu.add_checksum()
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
-    hdu.header.insert("CHECKSUM", (" ", s("Data Integrity")))
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
+    # Add the Data Integrity block and CHECKSUM/DATASUM placeholders before
+    # computing, so add_checksum updates the existing cards in place (single
+    # checksum pass) and the final card order matches the legacy layout.
+    hdu.header.append(BLANK_CARD, end=True)
+    hdu.header.append((" ", s("Data Integrity")), end=True)
+    hdu.header.append(BLANK_CARD, end=True)
+    hdu.header.append(("CHECKSUM", "0" * 16, ""), end=True)
+    hdu.header.append(("DATASUM", "0", ""), end=True)
     hdu.add_checksum()
     return hdu
     
@@ -233,9 +236,20 @@ def resolve_model(model_or_model_name):
     else:
         return model_or_model_name
 
+_FIELDS_AND_PIXEL_ARRAYS_CACHE = {}
+
+
 def get_fields_and_pixel_arrays(models, name_conflict_strategy=None, ignore_field_names=None):
-    
+    # Fast path: default conflict strategy and hashable inputs — return a cached OrderedDict.
+    # Callers in this codebase only iterate the result; do not mutate it.
     if name_conflict_strategy is None:
+        models_key = tuple(models)
+        ignore_key = tuple(ignore_field_names) if ignore_field_names is not None else None
+        cache_key = (models_key, ignore_key)
+        cached = _FIELDS_AND_PIXEL_ARRAYS_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
         def default_conflict_strategy(fields, name, field, model):
             # Overwrite the previous field, since the hierarchy of models is usually
             # Source -> spectrum_level -> pipeline_level
@@ -244,6 +258,8 @@ def get_fields_and_pixel_arrays(models, name_conflict_strategy=None, ignore_fiel
             return None
 
         name_conflict_strategy = default_conflict_strategy
+    else:
+        cache_key = None
 
     fields = OrderedDict([])
     for model in models:
@@ -258,12 +274,15 @@ def get_fields_and_pixel_arrays(models, name_conflict_strategy=None, ignore_fiel
                 field = model._meta.fields.get(name, field)
 
             if name in fields:
-                name_conflict_strategy(fields, name, field, model)                
+                name_conflict_strategy(fields, name, field, model)
             else:
                 fields[name] = field
-            
+
             warn_on_long_name_or_comment(field)
-    
+
+    if cache_key is not None:
+        _FIELDS_AND_PIXEL_ARRAYS_CACHE[cache_key] = fields
+
     return fields
 
 
@@ -365,12 +384,15 @@ def get_binary_table_hdu(
 
     log.info("Added category headers and comments")
     # TODO: Add comments for flag definitions?
-    
-    # Add checksums.
-    hdu.add_checksum()
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
-    hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
+
+    # Add the DATA INTEGRITY block and CHECKSUM/DATASUM placeholders before
+    # computing, so add_checksum updates the existing cards in place (single
+    # checksum pass) and the final card order matches the legacy layout.
+    hdu.header.append(BLANK_CARD, end=True)
+    hdu.header.append((" ", "DATA INTEGRITY"), end=True)
+    hdu.header.append(BLANK_CARD, end=True)
+    hdu.header.append(("CHECKSUM", "0" * 16, ""), end=True)
+    hdu.header.append(("DATASUM", "0", ""), end=True)
     hdu.add_checksum()
 
     log.info("Added checksums")

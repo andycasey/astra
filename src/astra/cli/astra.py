@@ -435,6 +435,7 @@ def srun(
     mem: Annotated[str, typer.Option(help="Memory per node")] = 0,
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
     exclusive: Annotated[bool, typer.Option(help="Use exclusive node allocation.")] = True,
+    only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
 ):
     """Distribute an Astra task over many nodes using Slurm."""
 
@@ -473,7 +474,7 @@ def srun(
     from rich.console import Console
     from logging import FileHandler
 
-    queries = generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit)
+    queries = generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit, missing_only=only_missing)
 
     considered_models = []
     for model, q in queries:
@@ -551,7 +552,8 @@ def srun(
                 for page in range(n * procs, (n + 1) * procs):
                     status_path = f"{td}/live-{n}-{page}"
                     status_path_locks[progress][status_path] = 0
-                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1} --live-renderable-path {status_path} &")
+                    only_missing_flag = " --only-missing" if only_missing else ""
+                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1}{only_missing_flag} --live-renderable-path {status_path} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -644,7 +646,8 @@ def run(
     limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
     page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
     live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None,
-    dry_run: Annotated[bool, typer.Option(help="Print the queries that would be run without executing them.")] = False
+    dry_run: Annotated[bool, typer.Option(help="Print the queries that would be run without executing them.")] = False,
+    only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
 ):
     """Run an Astra task on spectra."""
 
@@ -725,7 +728,8 @@ def run(
         spectrum_model,
         sdss_ids=sdss_ids,
         limit=limit,
-        page=page
+        page=page,
+        missing_only=only_missing,
     )
     from time import sleep
 
@@ -1191,6 +1195,7 @@ def init(
 
     init_model_packages = (
         "apogee",
+        "aspcap",
         "boss",
         "bossnet",
         "apogeenet",

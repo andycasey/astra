@@ -52,13 +52,13 @@ def transform(v, image, instance):
             None
     else:
         raise ValueError(f"Cannot find {expected_path} in {image}")
-    
-    i -= 1 # put it back to 0-index 
+
+    i -= 1 # put it back to 0-index
     # offset for stacks
     if N > 2:
         i += 2
     return v[i]
-    
+
 
 
 class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
@@ -66,7 +66,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     """An APOGEE visit spectrum, stored in an apVisit data product."""
 
     pk = AutoField()
-    
+
     # A decision was made here.
 
     # I want the `spectrum_pk` to be unique across tables. I don't want to run
@@ -83,10 +83,10 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     # I'm going to provide a default function of `Spectrum.create`, and then
     # pre-assign all of these in bulk when we do bulk inserts. I wish there
     # was a better way to avoid calling `Spectrum.create` every time, and still
-    # enforce a constraint so that the user doesn't have to handle this 
+    # enforce a constraint so that the user doesn't have to handle this
     # themselves, but I think getting that constraint to work well on SQLite
-    # and PostgreSQL is hard. 
-    
+    # and PostgreSQL is hard.
+
     # Note that this explicitly breaks one of the 'Lessons learned from IPL-2'!
 
     #> Identifiers
@@ -100,11 +100,11 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     )
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
-        Source, 
-        # We want to allow for spectra to be unassociated with a source so that 
+        Source,
+        # We want to allow for spectra to be unassociated with a source so that
         # we can test with fake spectra, etc, but any pipeline should run their
         # own checks to make sure that spectra and sources are linked.
-        null=True, 
+        null=True,
         index=True,
         column_name="source_pk",
         backref="apogee_visit_spectra",
@@ -112,7 +112,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     created = DateTimeField(default=datetime.datetime.now)
     modified = DateTimeField(default=datetime.datetime.now)
-        
+
     catalogid = BigIntegerField(index=True, null=True)
     star_pk = BigIntegerField(null=True, unique=False) # Note: unique = False
     visit_pk = BigIntegerField(null=True, unique=True)
@@ -151,14 +151,14 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flux = PixelArray(ext=1, transform=lambda x, *_: x[::-1, ::-1])
     ivar = PixelArray(ext=2, transform=lambda x, *_: x[::-1, ::-1]**-2)
     pixel_flags = PixelArray(ext=3, transform=lambda x, *_: x[::-1, ::-1])
-    
+
     #> Observing Conditions
     date_obs = DateTimeField(null=True)
     jd = FloatField(null=True)
     exptime = FloatField(null=True)
     dithered = BooleanField(null=True)
     f_night_time = FloatField(null=True)
-    
+
     #> Telescope Pointing
     input_ra = FloatField(null=True)
     input_dec = FloatField(null=True)
@@ -167,11 +167,11 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     on_target = IntegerField(null=True)
     valid = IntegerField(null=True)
     fps = BooleanField(null=True)
-    
-    #> Statistics and Spectrum Quality 
+
+    #> Statistics and Spectrum Quality
     snr = FloatField(null=True)
     spectrum_flags = BitField(default=0)
-    
+
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     # and https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/utils/bitmask.py#L9
     flag_bad_pixels = spectrum_flags.flag(2**0)
@@ -196,7 +196,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flag_suspect_rotation = spectrum_flags.flag(2**23)
     flag_mtpflux_lt_75 = spectrum_flags.flag(2**24)
     flag_mtpflux_lt_50 = spectrum_flags.flag(2**25)
-    
+
     flag_missing_or_corrupted_file = spectrum_flags.flag(2**26)
 
     #> Radial Velocity (Doppler)
@@ -204,7 +204,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     v_rel = FloatField(null=True)
     e_v_rel = FloatField(null=True)
     bc = FloatField(null=True)
-    
+
     doppler_teff = FloatField(null=True)
     doppler_e_teff = FloatField(null=True)
     doppler_logg = FloatField(null=True)
@@ -213,7 +213,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     doppler_e_fe_h = FloatField(null=True)
     doppler_rchi2 = FloatField(null=True)
     doppler_flags = BitField(default=0)
-    
+
     #> Radial Velocity (X-Correlation)
     xcorr_v_rad = FloatField(null=True)
     xcorr_v_rel = FloatField(null=True)
@@ -249,7 +249,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
                 return "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
             else:
                 return "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
-        
+
 
     @property
     def path(self):
@@ -294,11 +294,11 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
-        Source, 
-        # We want to allow for spectra to be unassociated with a source so that 
+        Source,
+        # We want to allow for spectra to be unassociated with a source so that
         # we can test with fake spectra, etc, but any pipeline should run their
         # own checks to make sure that spectra and sources are linked.
-        null=True, 
+        null=True,
         index=True,
         column_name="source_pk",
         backref="apogee_visit_spectra_in_apstar",
@@ -319,7 +319,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         lazy_load=False,
         field=ApogeeVisitSpectrum.spectrum_pk,
         column_name="drp_spectrum_pk"
-    )    
+    )
 
     created = DateTimeField(default=datetime.datetime.now)
     modified = DateTimeField(default=datetime.datetime.now)
@@ -371,7 +371,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
             healpix = self.healpix or self.source.healpix
             kwds["healpix"] = healpix
             kwds["healpix_group"] = "{:d}".format(int(healpix) // 1000)
-        
+
         return template.format(**kwds)
 
 
@@ -406,7 +406,7 @@ def _transform_coadded_spectrum(v, image, instance):
     else:
         return v[0]
 
-    
+
 class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
     """
@@ -417,22 +417,23 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
-        Source, 
-        # We want to allow for spectra to be unassociated with a source so that 
+        Source,
+        # We want to allow for spectra to be unassociated with a source so that
         # we can test with fake spectra, etc, but any pipeline should run their
         # own checks to make sure that spectra and sources are linked.
-        null=True, 
+        null=True,
         index=True,
         column_name="source_pk",
         backref="apogee_coadded_spectra_in_apstar",
     )
-    
+
     created = DateTimeField(default=datetime.datetime.now)
     modified = DateTimeField(default=datetime.datetime.now)
 
 
     #> Identifiers
     star_pk = BigIntegerField(null=True, unique=True)
+    catalogid = BigIntegerField(index=True, null=True)
     spectrum_pk = ForeignKeyField(
         Spectrum,
         null=True,
@@ -476,7 +477,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     e_v_rad = FloatField(null=True)
     std_v_rad = FloatField(null=True)
     median_e_v_rad = FloatField(null=True)
-    
+
     doppler_teff = FloatField(null=True)
     doppler_e_teff = FloatField(null=True)
     doppler_logg = FloatField(null=True)
@@ -522,7 +523,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         return template.format(
             **self.__data__,
             **kwds
-        )        
+        )
 
     class Meta:
         indexes = (
@@ -539,4 +540,4 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
                 ),
                 True,
             ),
-        )            
+        )

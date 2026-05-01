@@ -285,7 +285,7 @@ def _create_mwmVisit_and_mwmStar_products(
                 t_write_star = -time()
                 mwmStar = fits.HDUList(mwmStar_hdus)
                 mwmStar.writeto(mwmStar_path, overwrite=True)
-                os.system(f"chmod 755 {mwmStar_path}")
+                os.chmod(mwmStar_path, 0o755)
                 t_write_star += time()
 
                 #log.info(f"Created {mwmStar_path}")
@@ -297,7 +297,7 @@ def _create_mwmVisit_and_mwmStar_products(
                 t_write_visit = -time()
                 mwmVisit = fits.HDUList(mwmVisit_hdus)
                 mwmVisit.writeto(mwmVisit_path, overwrite=True)
-                os.system(f"chmod 755 {mwmVisit_path}")
+                os.chmod(mwmVisit_path, 0o755)
                 t_write_visit += time()
                 #log.info(f"Created {mwmVisit_path}")
             #else:
@@ -308,7 +308,7 @@ def _create_mwmVisit_and_mwmStar_products(
         )
         # From the `times` dictionary, print some summaries about how long things took.
         total_time = sum(list(times.values()))
-        print(f"Times for {source} / {source.sdss_id}: total: {total_time:.3f} sec")
+        print(f"Times for source_pk{source} / sdss_id={source.sdss_id}: total: {total_time:.3f} sec")
         for j, (key, value) in enumerate(sorted(times.items(), key=lambda x: x[1], reverse=True)):
             print(f"\t{key}: {value:.3f} sec ({100.0 * value / total_time:.1f}%)")
             if j >= 2:
@@ -347,8 +347,16 @@ def _create_single_model_hdu(
     for result in results:
         if result is None:
             continue
+        # Pull non-pixel values straight from peewee's __data__ to skip the
+        # FieldAccessor.__get__ overhead; pixel arrays still need the descriptor.
+        result_data = getattr(result, "__data__", None) or {}
         for name, field in fields.items():
-            value = getattr(result, name)
+            if isinstance(field, BasePixelArrayAccessor):
+                value = getattr(result, name)
+            elif name in result_data:
+                value = result_data[name]
+            else:
+                value = getattr(result, name)
             if value is None:
                 value = get_fill_value(field, fill_values)
             data[name].append(value)
@@ -377,11 +385,14 @@ def _create_single_model_hdu(
     add_category_headers(hdu, (model, ), original_names, upper, suppress_warnings=True)
     add_category_comments(hdu, (model, ), original_names, upper)
 
-    # Add checksums.
-    hdu.add_checksum()
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
-    hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
+    # Add the DATA INTEGRITY block and CHECKSUM/DATASUM placeholders before
+    # computing, so add_checksum updates the existing cards in place (single
+    # checksum pass) and the final card order matches the legacy layout.
+    hdu.header.append(BLANK_CARD, end=True)
+    hdu.header.append((" ", "DATA INTEGRITY"), end=True)
+    hdu.header.append(BLANK_CARD, end=True)
+    hdu.header.append(("CHECKSUM", "0" * 16, ""), end=True)
+    hdu.header.append(("DATASUM", "0", ""), end=True)
     hdu.add_checksum()
 
     return hdu

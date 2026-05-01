@@ -24,24 +24,24 @@ APOGEE_FERRE_MASK = get_apogee_pixel_mask()
 
 
 class FerreOutputMixin:
-        
+
     @cached_property
     def ferre_flux(self):
         return self._get_input_pixel_array("flux.input")
-        
+
     @cached_property
     def ferre_e_flux(self):
         return self._get_input_pixel_array("e_flux.input")
-    
+
 
     @cached_property
     def model_flux(self):
         return self._get_output_pixel_array("model_flux.output")
-        
+
     @cached_property
     def rectified_model_flux(self):
         return self._get_output_pixel_array("rectified_model_flux.output")
-        
+
     @cached_property
     def rectified_flux(self):
         return self._get_output_pixel_array("rectified_flux.output")
@@ -56,22 +56,22 @@ class FerreOutputMixin:
         unmasked_array[APOGEE_FERRE_MASK] = array
         return unmasked_array
 
-        
+
     def _get_input_pixel_array(self, basename):
         return np.loadtxt(
             fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_index), 
+            skiprows=int(self.ferre_index),
             max_rows=1,
         )
 
 
     def _get_output_pixel_array(self, basename, P=7514):
-        
+
         #assert self.ferre_index >= 0
 
         kwds = dict(
             fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_index), 
+            skiprows=int(self.ferre_index),
             max_rows=1,
         )
         '''
@@ -119,7 +119,7 @@ class FerreCoarse(PipelineOutputMixin, FerreOutputMixin):
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
     header_path = TextField(default="")
-    
+
     #> Initial Stellar Parameters
     initial_teff = FloatField(null=True)
     initial_logg = FloatField(null=True)
@@ -177,7 +177,7 @@ class FerreCoarse(PipelineOutputMixin, FerreOutputMixin):
     e_c_m = FloatField(null=True)
     n_m = FloatField(null=True)
     e_n_m = FloatField(null=True)
- 
+
     #> FERRE Access Fields
     ferre_name = TextField(default="")
     ferre_index = IntegerField(default=-1)
@@ -186,7 +186,7 @@ class FerreCoarse(PipelineOutputMixin, FerreOutputMixin):
     #> Summary Statistics
     snr = FloatField(null=True)
     rchi2 = FloatField(null=True)
-    penalized_rchi2 = FloatField(null=True) 
+    penalized_rchi2 = FloatField(null=True)
     ferre_log_snr_sq = FloatField(null=True)
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
@@ -212,9 +212,9 @@ class FerreCoarse(PipelineOutputMixin, FerreOutputMixin):
     flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**17)
     flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
-    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)    
+    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
     flag_caused_timeout = ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
-    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")    
+    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")
     flag_multiple_equally_good_coarse_results = ferre_flags.flag(2**23, help_text="Multiple equally good coarse results")
     flag_no_good_coarse_result = ferre_flags.flag(2**24, "No good result from coarse grid")
 
@@ -231,13 +231,13 @@ class FerreCoarse(PipelineOutputMixin, FerreOutputMixin):
                 ),
                 True,
             ),
-        )  
-    '''          
+        )
+    '''
 
 class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
 
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    #source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    #spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreCoarse, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
@@ -248,12 +248,12 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
     t_elapsed = FloatField(null=True)
     t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
-    
+
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
     header_path = TextField(default="")
-    
+
     #> Initial Stellar Parameters
     initial_teff = FloatField(null=True)
     initial_logg = FloatField(null=True)
@@ -346,7 +346,7 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
     flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**17)
     flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
-    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)    
+    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
 
 
 
@@ -362,7 +362,7 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
                 ),
                 True,
             ),
-        )            
+        )
     '''
 
 
@@ -373,13 +373,13 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     @cached_property
     def ferre_flux(self):
         return self._get_input_pixel_array("../flux.input")
-        
+
     @cached_property
     def ferre_e_flux(self):
         return self._get_input_pixel_array("../e_flux.input")
-    
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+
+    #source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    #spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreStellarParameters, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
@@ -390,12 +390,12 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     t_elapsed = FloatField(null=True)
     t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
-    
+
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
     header_path = TextField(default="")
-    
+
     #> Initial Stellar Parameters
     initial_teff = FloatField(null=True)
     initial_logg = FloatField(null=True)
@@ -464,7 +464,7 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
-    
+
     flag_ferre_fail = ferre_flags.flag(2**0, help_text="FERRE failed")
     flag_missing_model_flux = ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE")
     flag_potential_ferre_timeout = ferre_flags.flag(2**2, help_text="Potentially impacted by FERRE timeout")
@@ -485,7 +485,7 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**17)
     flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
-    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)    
+    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
 
 
     '''
@@ -499,5 +499,5 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
                 ),
                 True,
             ),
-        )            
+        )
     '''

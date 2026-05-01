@@ -578,8 +578,6 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
         .count()
     )
 
-    # TODO: not even clear how to link these here... need to
-    """
     if unlinked_coadd_count > 0:
         with queue.subtask("Linking APOGEE coadded spectra to sources", total=unlinked_coadd_count) as coadd_step:
             # Link by catalogid
@@ -598,7 +596,7 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
                     )
                 n_linked += updated
                 coadd_step.update(advance=updated)
-    """
+
     return n_linked
 
 

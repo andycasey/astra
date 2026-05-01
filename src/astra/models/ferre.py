@@ -241,14 +241,14 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
     upstream = ForeignKeyField(FerreCoarse, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
-
+    #task_pk = AutoField()
+    #v_astra = TextField(default=__version__)
+    #created = DateTimeField(default=datetime.datetime.now)
+    #modified = DateTimeField(default=datetime.datetime.now)
+    #t_elapsed = FloatField(null=True)
+    #t_overhead = FloatField(null=True)
+    #tag = TextField(default="", index=True)
+    
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
@@ -383,6 +383,7 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     upstream = ForeignKeyField(FerreStellarParameters, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
+<<<<<<< HEAD
     task_pk = AutoField()
     v_astra = TextField(default=__version__)
     created = DateTimeField(default=datetime.datetime.now)
@@ -391,6 +392,16 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
 
+=======
+    #task_pk = AutoField()
+    #v_astra = TextField(default=__version__)
+    #created = DateTimeField(default=datetime.datetime.now)
+    #modified = DateTimeField(default=datetime.datetime.now)
+    #t_elapsed = FloatField(null=True)
+    #t_overhead = FloatField(null=True)
+    #tag = TextField(default="", index=True)
+    
+>>>>>>> 0795b51 (Comment out metadata fields in Ferre model)
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")

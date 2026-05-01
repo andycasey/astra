@@ -6,6 +6,7 @@ from astra.utils import log, list_to_dict
 from astra.models.aspcap import FerreCoarse
 from astra.models.aspcap import ASPCAP
 from astra.pipelines.aspcap.coarse import penalize_coarse_stellar_parameter_result
+from astra.pipelines.aspcap.debugger import debugger
 from astra.pipelines.ferre.utils import parse_header_path
 from astra.pipelines.aspcap.continuum import MedianFilter
 
@@ -23,6 +24,8 @@ def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
 
 
 def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_path, pre_continuum=MedianFilter, **kwargs):
+
+    debugger(f"plan_stellar_parameters_stage: entry n_coarse_results={len(coarse_results)} n_spectra={len(spectra)} pre_continuum={pre_continuum}")
 
     best_coarse_results = {}
     for kwds in coarse_results:
@@ -56,6 +59,8 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
             best_coarse_results[this.spectrum_pk] = best
 
 
+    debugger(f"plan_stellar_parameters_stage: built best_coarse_results n={len(best_coarse_results)}")
+
     spectra_dict = { s.spectrum_pk: s for s in spectra }
 
     #no_good_result = set(spectra_dict.keys()).difference(best_coarse_results.keys())
@@ -65,20 +70,25 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         pre_computed_continuum = { s.spectrum_pk: 1 for s in spectra }
     else:
         fun = pre_continuum()
+        debugger(f"plan_stellar_parameters_stage: instantiated pre_continuum; submitting {len(best_coarse_results)} continuum futures with cpu_count={os.cpu_count()}")
 
         futures = []
         with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as executor:
             for r in best_coarse_results.values():
                 spectrum = spectra_dict[r.spectrum_pk]
                 futures.append(executor.submit(_pre_compute_continuum, r, spectrum, fun))
+            debugger(f"plan_stellar_parameters_stage: all {len(futures)} continuum futures submitted; waiting for executor shutdown")
 
+        debugger(f"plan_stellar_parameters_stage: ThreadPoolExecutor closed; collecting results")
         pre_computed_continuum = {}
         #with tqdm(total=len(futures), desc="Pre-computing continuum") as pb:
         for future in concurrent.futures.as_completed(futures):
             spectrum_pk, continuum = future.result()
             pre_computed_continuum[spectrum_pk] = continuum
+        debugger(f"plan_stellar_parameters_stage: pre_computed_continuum collected n={len(pre_computed_continuum)}")
 
     # Plan the next stage
+    debugger(f"plan_stellar_parameters_stage: building group_task_kwds")
     group_task_kwds = {}
     for r in best_coarse_results.values():
         group_task_kwds.setdefault(r.header_path, [])
@@ -113,4 +123,5 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         )
         stellar_parameter_plans.append([group_task_kwds[header_path]])
 
+    debugger(f"plan_stellar_parameters_stage: returning {len(stellar_parameter_plans)} plans, {len(best_coarse_results)} best coarse results")
     return (stellar_parameter_plans, best_coarse_results)

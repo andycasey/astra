@@ -28,14 +28,7 @@ from astra.pipelines.aspcap.abundances import plan_abundances_stage, get_species
 #from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
 from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
-RAND = np.random.randint(0, 1000)
-from socket import gethostname
-
-HOSTNAME = gethostname()
-
-def debugger(*foo):
-    with open(f"/scratch/general/nfs1/u6020307/pbs/{HOSTNAME}-{RAND}.log", "a") as fp:
-        fp.write(" ".join(map(str, foo)) + "\n")
+from astra.pipelines.aspcap.debugger import debugger, HOSTNAME, RAND
 
 #cd /scratch/general/nfs1/u6020307/pbs/aspcap-2025-02-12-ax1pzxtc
 
@@ -76,8 +69,8 @@ def aspcap(
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     parent_dir: Optional[str] = None,
-    n_threads: Optional[int] = 32,
-    max_processes: Optional[int] = 16,
+    n_threads: Optional[int] = 128, # 32 in normal mode
+    max_processes: Optional[int] = 4, # 16 previously, 4 in normal mode,
     max_threads: Optional[int] = 128,
     max_concurrent_loading: Optional[int] = 4,
     soft_thread_ratio: Optional[float] = 1,
@@ -215,7 +208,10 @@ def aspcap(
 
 
         coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)
+        debugger(f"aspcap: coarse stage returned: {len(coarse_results)} results, {len(coarse_failures)} failures")
+        debugger(f"aspcap: about to yield from coarse_failures (n={len(coarse_failures)})")
         yield from coarse_failures
+        debugger(f"aspcap: done yielding coarse_failures; calling plan_stellar_parameters_stage")
 
         stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
             spectra=spectra,
@@ -225,6 +221,7 @@ def aspcap(
             n_threads=n_threads,
             **ferre_kwds
         )
+        debugger(f"aspcap: plan_stellar_parameters_stage returned: {len(stellar_parameter_plans)} plans, {len(best_coarse_results)} best coarse results")
         param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
         yield from param_failures
 
@@ -584,6 +581,7 @@ def _aspcap_stage(
             progress.update(task_id, completed=True, visible=False, refresh=True)
     else:
         pb.__exit__(None, None, None)
+    debugger(f"_aspcap_stage[{stage}] about to return: {len(successes)} successes, {len(failures)} failures")
     return (successes, list(failures.values()))
 
 
@@ -612,6 +610,8 @@ def ferre(
 
         ferre_hanging = threading.Event()
         stdout, n_complete, t_start, t_last_communication, t_overhead, t_awaiting, t_elapsed, exclude_indices, n_threads_to_release = ([], 0, time(), time(), None, {}, {}, [], max(0, n_threads))
+        # Guards concurrent access to t_awaiting and t_elapsed between the main reader loop and the monitor thread.
+        state_lock = threading.Lock()
 
         command = ["ferre.x"]
         if is_list_mode:
@@ -627,7 +627,12 @@ def ferre(
         def monitor():
             try:
                 while not ferre_hanging.is_set():
-                    debugger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting} in {cwd}")
+                    # Snapshot the shared dicts under the lock so subsequent reads are race-free.
+                    with state_lock:
+                        t_awaiting_snapshot = dict(t_awaiting)
+                        t_elapsed_snapshot = {k: list(v) for k, v in t_elapsed.items()}
+
+                    debugger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting_snapshot} in {cwd}")
 
                     if (max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
                         debugger(f"hanging no communication")
@@ -640,21 +645,21 @@ def ferre(
 
 
                     if (
-                        ((max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting)
+                        ((max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting_snapshot)
                     or  (max_t_grid_load is not None and t_overhead is None and ((time() - t_start) > max_t_grid_load))
                     ):
-                        n_await = len(t_awaiting)
-                        n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
-                        n_complete = sum([len(v) == n_execution for v in t_elapsed.values()])
+                        n_await = len(t_awaiting_snapshot)
+                        n_execution = 0 if len(t_elapsed_snapshot) == 0 else max(list(map(len, t_elapsed_snapshot.values())))
+                        n_complete = sum([len(v) == n_execution for v in t_elapsed_snapshot.values()])
 
                         t_elapsed_per_spectrum_execution = []
-                        for k, v in t_elapsed.items():
+                        for k, v in t_elapsed_snapshot.items():
                             t_elapsed_per_spectrum_execution.extend(v)
 
-                        debugger(f"checking on {n_await} things {len(t_awaiting)} {len(t_elapsed_per_spectrum_execution)} {max_t_elapsed} {max_sigma_outlier}")
+                        debugger(f"checking on {n_await} things {len(t_awaiting_snapshot)} {len(t_elapsed_per_spectrum_execution)} {max_t_elapsed} {max_sigma_outlier}")
 
                         if (
-                        (len(t_awaiting) > 0)
+                        (len(t_awaiting_snapshot) > 0)
                         and (max_t_elapsed is not None or max_sigma_outlier is not None)
                         ):
 
@@ -667,7 +672,11 @@ def ferre(
                                 if stddev == 0:
                                     stddev = 10.0
 
-                            t_awaiting_elapsed = { k: (time() + v) for k, v in t_awaiting.items() }
+                            t_awaiting_elapsed = { k: (time() + v) for k, v in t_awaiting_snapshot.items() }
+                            if not t_awaiting_elapsed:
+                                # Snapshot was non-empty but the comprehension produced nothing — defensive guard.
+                                sleep(1)
+                                continue
                             waiting_elapsed = max(t_awaiting_elapsed.values())
                             sigma_outlier = (waiting_elapsed - median)/stddev
 
@@ -725,7 +734,8 @@ def ferre(
 
             if match := REGEX_NEXT_OBJECT.search(line):
                 t_last_communication = time()
-                t_awaiting[int(match.group(1))] = -time()
+                with state_lock:
+                    t_awaiting[int(match.group(1))] = -time()
                 if t_overhead is None:
                     t_overhead = time() - t_start
                     pipe.send(dict(input_nml_path=input_nml_path, n_loading=-1))
@@ -734,12 +744,13 @@ def ferre(
                 t_last_communication = time()
 
                 key = match.group(2)
-                t_elapsed.setdefault(key, [])
-                try:
-                    t = t_awaiting.pop(int(match.group(1))) + time()
-                except:
-                    t = np.nan
-                t_elapsed[key].append(t)
+                with state_lock:
+                    t_elapsed.setdefault(key, [])
+                    try:
+                        t = t_awaiting.pop(int(match.group(1))) + time()
+                    except:
+                        t = np.nan
+                    t_elapsed[key].append(t)
                 n_complete += 1
                 n_remaining = n_obj - n_complete
 

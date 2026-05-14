@@ -139,6 +139,9 @@ def aspcap(
         if initial_guess_callable is None:
             initial_guess_callable = get_initial_arjl_guesses
         kwargs.update(ferre_kwds=dict(continuum_order=2))
+    else:
+        if initial_guess_callable is None:
+            initial_guess_callable = get_initial_guesses
 
     if parent_dir is None:
         _dir = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/aspcap/")

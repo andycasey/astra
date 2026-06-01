@@ -43,7 +43,6 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
         .select()
         .where(
             (ApogeeCoaddedSpectrumInApStar.apred == apred)
-        &   (ApogeeCoaddedSpectrumInApStar.mean_fiber.is_null())
         )
         .limit(limit)
         .iterator()

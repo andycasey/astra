@@ -1484,6 +1484,162 @@ def apply_ipl3_logg_corrections(batch_size: int = 500, limit: int = None):
 
 # ADD NEW FUNCTIONS #
 
+def get_ipl4v2_teff_corrections(logg, mh, teff):
+    """
+    Apply IPL-4v2 corrections to the effective temperature.
+    Guilherme Limberg calibrated to GHB09 J-K Teff
+    """
+    logg, mh, teff = np.asarray(logg), np.asarray(mh), np.asarray(teff)
+    is_giant = logg < 3.8 # TODO
+    is_dwarf = np.logical_not(is_giant)
+
+    teff_corr = np.full_like(teff, np.nan)
+    teff_corr[is_giant] = np.nan # TODO
+    teff_corr[is_dwarf] = np.nan # TODO
+
+    return teff_corr, is_giant, is_dwarf
+
+def get_ipl4v2_logg_corrections(logg_spec, mh, teff, maxiter=100, tol=1e-4):
+    """
+    logg: Alex Ji calibrated to APOKASC3 asteroseismic logg for giants
+    maxiter and tol are because the correction is a function of asteroseismic logg, so you need to iterate
+    Returns (logg_cal, n_iter).
+    """
+    ## Define the correction function for giants
+    # For historical reasons, the giant model is called "model D "
+    # It is a function to find the correction as a function of *asteroseismic* logg, so you need to iterate
+    # logg: simultaneous 2D degree-3 polynomial in (logg_astero, [M/H])
+    # Terms: 1, z, g, z^2, g*z, g^2, z^3, g*z^2, g^2*z, g^3
+    COEFF_D = np.array([
+        0.35694673,   # 1
+        -0.07801092,   # z
+        -0.18306129,   # g
+        -0.07847194,   # z^2
+        0.24208357,   # g*z
+        0.09102127,   # g^2
+        -0.00585212,   # z^3
+        -0.01810008,   # g*z^2
+        -0.05627984,   # g^2*z
+        -0.01893467,   # g^3
+    ])
+    DEGREE_D = 3
+    # Clamping boundaries
+    _G_MIN_GIANT    = 0.5
+    _G_MAX_GIANT    = 3.5   
+    _Z_MIN          = -2.0
+    _Z_MAX          =  0.6
+    # For now don't correct anything with logg above this
+    _SPLIT_DWARFS   = 4.3 
+
+    def _design_matrix_2d(x, y, degree):
+        cols = []
+        for d in range(degree + 1):
+            for i in range(d + 1):
+                j = d - i
+                cols.append(x**i * y**j)
+        return np.column_stack(cols)
+
+    def _correction_D(g, z):
+        gc = np.clip(g, _G_MIN_GIANT, _G_MAX_GIANT)
+        zc = np.clip(z, _Z_MIN, _Z_MAX)
+        return _design_matrix_2d(gc, zc, DEGREE_D) @ COEFF_D
+
+    ## Grab the raw values
+    logg_spec = np.asarray(logg_spec, dtype=float)
+    mh        = np.asarray(mh,        dtype=float)
+    teff      = np.asarray(teff,        dtype=float)
+
+    ## Need to iterate to get asteroseismic logg
+    logg_cal = np.full_like(logg_spec, np.nan)
+    n_iter = 0 # default to 0 if we don't have any giants
+    giant_ok = np.isfinite(logg_spec) & np.isfinite(mh)
+    if giant_ok.any():
+        logg_est = logg_spec[giant_ok].copy()
+        mh_g     = mh[giant_ok]
+        spec_g   = logg_spec[giant_ok]
+        for n_iter in range(1, maxiter + 1):
+            corr     = _correction_D(logg_est, mh_g)
+            logg_new = spec_g - corr
+            finite   = np.isfinite(logg_new) & np.isfinite(logg_est)
+            delta    = np.max(np.abs(logg_new[finite] - logg_est[finite])) if finite.any() else 0.0
+            logg_est = logg_new
+            if delta < tol:
+                break
+        logg_cal[giant_ok] = logg_est
+    
+    ## TODO add dwarf corrections when we have them
+    ## Remove calibration for dwarfs
+    _ii = logg_spec >= _SPLIT_DWARFS
+    logg_cal[_ii] = np.nan #logg_spec[_ii]
+
+    is_dwarf = _ii
+    is_giant = np.logical_not(is_dwarf)
+
+    return logg_cal, is_giant, is_dwarf, n_iter
+
+def apply_ipl4v2_parameter_corrections(batch_size: int = 500):
+    """
+    Apply the IPL-4v2 corrections to the ASPCAP table.
+    Teff: Guilherme Limberg calibrated to GHB09 J-K Teff
+    M/H: no corrections yet
+    X/M: no corrections yet
+    """
+
+    q = ASPCAP.select()
+    with tqdm(total=0, desc="Applying corrections") as pb:
+        for chunk in chunked(q, batch_size):
+            updated = []
+            raw_loggs = []
+            raw_mhs = []
+            raw_teffs = []
+
+            ## Pull all the relevant informtion for calculation corrections
+            ## note: Andy tells me that I cannot loop over chunk twice
+            ## but Gemini says I can because it makes a list
+            ## https://github.com/coleifer/peewee/blob/master/peewee.py#L419
+            ## If Andy's right the code doesn't work as it loops a second time
+            for r in chunk:
+                raw_loggs.append(r.raw_logg)
+                raw_mhs.append(r.raw_m_h_atm)
+                raw_teffs.append(r.raw_teff)
+            
+            raw_loggs = np.array(raw_loggs) 
+            raw_mhs = np.array(raw_mhs)
+            raw_teffs = np.array(raw_teffs)
+
+            ## Compute correction
+            logg_cal_array, logg_is_giant, logg_is_dwarf, n_iter = get_ipl4v2_logg_corrections(raw_loggs, raw_mhs, raw_teffs)
+            teff_cal_array, teff_is_giant, teff_is_dwarf  = get_ipl4v2_teff_corrections(raw_loggs, raw_mhs, raw_teffs)
+            
+            ## Update rows
+            for r, logg_cal_val, logg_is_giant_val, logg_is_dwarf_val, teff_cal_val, teff_is_giant_val, teff_is_dwarf_val \
+                in zip(chunk, logg_cal_array, logg_is_giant, logg_is_dwarf, teff_cal_array, teff_is_giant, teff_is_dwarf):
+
+                update_logg = np.isfinite(logg_cal_val)
+                update_teff = np.isfinite(teff_cal_val)
+                update_MH = False
+                if update_logg:
+                    r.logg = logg_cal_val
+                    ## TODO may need to update flags?
+                    r.flag_as_giant_for_calibration = logg_is_giant_val
+                    r.flag_as_dwarf_for_calibration = logg_is_dwarf_val
+                if update_teff: 
+                    r.teff = teff_cal_val
+                    ## TODO may need to update flags?
+                if update_logg or update_teff or update_MH:
+                    updated.append(r)
+            if updated:
+                fields = [ASPCAP.logg, ASPCAP.flag_as_giant_for_calibration, ASPCAP.flag_as_dwarf_for_calibration, 
+                          ASPCAP.teff]
+                (
+                    ASPCAP
+                    .bulk_update(
+                        updated,
+                        fields=fields
+                    )
+                )
+            pb.update(batch_size)
+
 def apply_dr16_parameter_corrections(batch_size: int = 500):
     """
     Apply the DR16 corrections from arXiv:2007.05537 to the ASPCAP table.

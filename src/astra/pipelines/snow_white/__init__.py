@@ -61,8 +61,8 @@ def snow_white(
         l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
         new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="least_squares",loss='soft_l1')
         return(new_best)
-    #with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f:
-    with open(os.path.join(PIPELINE_DATA_DIR, '20240801_training_file'), 'rb') as f:
+    #with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f: 20240801_training_file
+    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_20092025'), 'rb') as f:
         kf = pickle.load(f, fix_imports=True)
 
     kf.verbose = 0

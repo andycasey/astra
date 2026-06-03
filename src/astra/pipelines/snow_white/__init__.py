@@ -67,16 +67,16 @@ def snow_white(
 
     kf.verbose = 0
 
-    wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref_sdss.npy"))
+    #wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref_sdss.npy"))
 
     # Once again, we hhave to put this stupid hack in
-    sys.path.insert(0, os.path.dirname(__file__))
-    with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
-        emu = pickle.load(pickle_file)
+    #sys.path.insert(0, os.path.dirname(__file__))
+    #with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
+    #    emu = pickle.load(pickle_file)
 
-    #with open(os.path.join(PIPELINE_DATA_DIR, "pca_spectral_model.pkl"), "rb") as pickle_file:
-     #   emu = pickle.load(pickle_file)
-    #wref=emu["wavelength"]
+    with open(os.path.join(PIPELINE_DATA_DIR, "pca_spectral_model.pkl"), "rb") as pickle_file:
+        emu = pickle.load(pickle_file)
+    wref=emu["wavelength"]
 
     for spectrum in spectra:
 

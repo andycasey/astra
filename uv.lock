@@ -436,7 +436,7 @@ requires-dist = [
     { name = "sdsstools" },
     { name = "specutils" },
     { name = "thread" },
-    { name = "torch", specifier = ">=2.12.0" },
+    { name = "torch" },
     { name = "tqdm" },
     { name = "typer" },
 ]

@@ -216,6 +216,7 @@ class Product(str, Enum):
     mwmVisit = "mwmVisit"
     mwmVisit_mwmStar = "mwmVisit/mwmStar"
     astraAllStarASPCAP = "astraAllStarASPCAP"
+    astraAllVisitASPCAP = "astraAllVisitASPCAP"
     astraAllStarAPOGEENet = "astraAllStarAPOGEENet"
     astraAllVisitAPOGEENet = "astraAllVisitAPOGEENet"
     astraAllStarBOSSNet = "astraAllStarBOSSNet"
@@ -282,6 +283,14 @@ def create(
                 {
                     "pipeline_model": "aspcap.ASPCAP",
                     "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitASPCAP: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "aspcap.ASPCAP",
+                    "apogee_spectrum_model": ApogeeVisitSpectrumInApStar,
                     "overwrite": overwrite
                 }
             ),

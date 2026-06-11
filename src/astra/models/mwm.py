@@ -464,6 +464,7 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     snr = FloatField(null=True, help_text=Glossary.snr)
     mean_fiber = FloatField(null=True, help_text="S/N-weighted mean visit fiber number")
     std_fiber = FloatField(null=True, help_text="Standard deviation of visit fiber numbers")
+    star_flags = BitField(default=0, help_text="spectrum_flags at the apStar product level")
     spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
 
     #> Radial Velocity (Doppler)
@@ -618,6 +619,7 @@ class ApogeeRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
     #> Statistics and Spectrum Quality 
     snr = FloatField(null=True, help_text=Glossary.snr)
     in_stack = BooleanField(null=False, help_text=Glossary.in_stack)
+    visit_flags = BitField(default=0, help_text="spectrum_flags at the apVisit product level")
     spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110

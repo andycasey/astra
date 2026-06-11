@@ -94,6 +94,7 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
                 spectrum.std_v_rad = float(metadata["VSCATTER"])
                 spectrum.median_e_v_rad = float(metadata.get("VERR_MED", np.nan))
                 spectrum.spectrum_flags = metadata["STARFLAG"]
+                spectrum.star_flags = metadata["STARFLAG"]
 
                 # The MJDS in the apStar file only list the MJDs that were included in the stack.
                 # But there could be other MJDs which were not included in the stack.
@@ -149,6 +150,7 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
                         ApogeeCoaddedSpectrumInApStar.std_v_rad,
                         ApogeeCoaddedSpectrumInApStar.median_e_v_rad,
                         ApogeeCoaddedSpectrumInApStar.spectrum_flags,
+                        ApogeeCoaddedSpectrumInApStar.star_flags,
                         ApogeeCoaddedSpectrumInApStar.min_mjd,
                         ApogeeCoaddedSpectrumInApStar.max_mjd
                     ]
@@ -501,6 +503,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             Star.ngoodvisits.alias("n_good_visits"),
             Star.ngoodrvs.alias("n_good_rvs"),
             Star.snr,
+            Star.starflag.alias("star_flags"),
             Star.starflag.alias("spectrum_flags"),
             Star.meanfib.alias("mean_fiber"),
             Star.sigfib.alias("std_fiber"),
@@ -757,7 +760,8 @@ def migrate_apogee_visits(
             Visit.on_target,
             Visit.valid,
             Visit.snr,
-            Visit.starflag.alias("spectrum_flags"),
+            Visit.visitflag.alias("visit_flags"),
+            Visit.visitflag.alias("spectrum_flags"),
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
 
@@ -1018,6 +1022,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
             Visit.fiberid.alias("fiber"),
             Visit.jd,
             Visit.dateobs.alias("date_obs"),
+            Visit.starflag.alias("visit_flags"),
             Visit.starflag.alias("spectrum_flags"),
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
@@ -1198,6 +1203,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
             Star.rv_flag.alias("doppler_flags"),
             Star.rv_ccfwhm.alias("ccfwhm"),
             Star.rv_autofwhm.alias("autofwhm"),
+            Star.starflag.alias("star_flags"),
             Star.starflag.alias("spectrum_flags"),
         )
         .dicts()
@@ -1270,6 +1276,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
                     ApogeeCoaddedSpectrumInApStar.ccfwhm,
                     ApogeeCoaddedSpectrumInApStar.autofwhm,
                     ApogeeCoaddedSpectrumInApStar.spectrum_flags,
+                    ApogeeCoaddedSpectrumInApStar.star_flags,
                 ),
                 update={
                     ApogeeCoaddedSpectrumInApStar.modified: datetime.now()
@@ -1329,6 +1336,7 @@ def update_apogee_combined_spectra_from_coadds(batch_size=500, queue=None):
         "mean_fiber",
         "std_fiber",
         "spectrum_flags",
+        "star_flags",
         "v_rad",
         "e_v_rad",
         "std_v_rad",

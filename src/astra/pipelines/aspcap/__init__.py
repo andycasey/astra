@@ -70,7 +70,7 @@ def aspcap(
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     parent_dir: Optional[str] = None,
     n_threads: Optional[int] = 128, # 32 in normal mode
-    max_processes: Optional[int] = 4, # 16 previously, 4 in normal mode,
+    max_processes: Optional[int] = 1, # 16 previously, 4 in normal mode,
     max_threads: Optional[int] = 128,
     max_concurrent_loading: Optional[int] = 4,
     soft_thread_ratio: Optional[float] = 1,

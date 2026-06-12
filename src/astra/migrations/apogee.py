@@ -38,100 +38,106 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
     queue = queue or ProgressContext()
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
-    q = (
-        ApogeeCoaddedSpectrumInApStar
-        .select()
-        .where(
-            (ApogeeCoaddedSpectrumInApStar.apred == apred)
+    try:
+        q = (
+            ApogeeCoaddedSpectrumInApStar
+            .select()
+            .where(
+                (ApogeeCoaddedSpectrumInApStar.apred == apred)
+            )
+            .limit(limit)
+            .iterator()
         )
-        .limit(limit)
-        .iterator()
-    )
 
-    apStar_spectra, futures = ({}, [])
-    total = 0
-    with queue.subtask("Getting apStar metadata", total=None) as get_step:
-        for total, spectrum in enumerate(q, start=1):
-            futures.append(executor.submit(_get_apstar_metadata, spectrum))
-            apStar_spectra[spectrum.spectrum_pk] = spectrum
-            get_step.update(advance=1)
-        get_step.update(total=total, completed=total)
+        apStar_spectra, futures = ({}, [])
+        total = 0
+        with queue.subtask("Getting apStar metadata", total=None) as get_step:
+            for total, spectrum in enumerate(q, start=1):
+                futures.append(executor.submit(_get_apstar_metadata, spectrum))
+                apStar_spectra[spectrum.spectrum_pk] = spectrum
+                get_step.update(advance=1)
+            get_step.update(total=total, completed=total)
 
-    visit_spectrum_data = []
-    failed_spectrum_pks = []
-    with queue.subtask("Collecting apStar metadata", total=total) as collect_step:
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            for spectrum_pk, metadata in result.items():
-                if metadata is None:
-                    failed_spectrum_pks.append(spectrum_pk)
-                    continue
+        visit_spectrum_data = []
+        failed_spectrum_pks = []
+        with queue.subtask("Collecting apStar metadata", total=total) as collect_step:
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                for spectrum_pk, metadata in result.items():
+                    if metadata is None:
+                        failed_spectrum_pks.append(spectrum_pk)
+                        continue
 
-                spectrum = apStar_spectra[spectrum_pk]
+                    spectrum = apStar_spectra[spectrum_pk]
 
-                mjds = []
-                sfiles = [metadata[f"SFILE{i}"] for i in range(1, int(metadata["NVISITS"]) + 1)]
-                for sfile in sfiles:
-                    #if spectrum.telescope == "apo1m":
-                    #    #"$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
-                    #    # sometimes it is stored as a float AHGGGGHGGGGHGHGHGH
-                    #    mjds.append(int(float(sfile.split("-")[2])))
-                    #else:
-                    #    mjds.append(int(float(sfile.split("-")[3])))
-                    #    # "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
-                    # NOTE: For SDSS5 data this is index 4: 'apVisit-1.2-apo25m-5339-59715-103.fits'
-                    mjds.append(int(float(sfile.split("-")[4])))
+                    mjds = []
+                    sfiles = [metadata[f"SFILE{i}"] for i in range(1, int(metadata["NVISITS"]) + 1)]
+                    for sfile in sfiles:
+                        #if spectrum.telescope == "apo1m":
+                        #    #"$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
+                        #    # sometimes it is stored as a float AHGGGGHGGGGHGHGHGH
+                        #    mjds.append(int(float(sfile.split("-")[2])))
+                        #else:
+                        #    mjds.append(int(float(sfile.split("-")[3])))
+                        #    # "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
+                        # NOTE: For SDSS5 data this is index 4: 'apVisit-1.2-apo25m-5339-59715-103.fits'
+                        mjds.append(int(float(sfile.split("-")[4])))
 
-                assert len(sfiles) == int(metadata["NVISITS"])
+                    assert len(sfiles) == int(metadata["NVISITS"])
 
-                spectrum.snr = float(metadata["SNR"])
-                spectrum.mean_fiber = float(metadata["MEANFIB"])
-                spectrum.std_fiber = float(metadata["SIGFIB"])
-                spectrum.n_good_visits = int(metadata["NVISITS"])
-                spectrum.n_good_rvs = int(metadata["NVISITS"])
-                spectrum.v_rad = float(metadata.get("VRAD", metadata.get("VHBARY")))
-                spectrum.e_v_rad = float(metadata["VERR"])
-                spectrum.std_v_rad = float(metadata["VSCATTER"])
-                spectrum.median_e_v_rad = float(metadata.get("VERR_MED", np.nan))
-                spectrum.spectrum_flags = metadata["STARFLAG"]
-                spectrum.star_flags = metadata["STARFLAG"]
+                    spectrum.snr = float(metadata["SNR"])
+                    spectrum.mean_fiber = float(metadata["MEANFIB"])
+                    spectrum.std_fiber = float(metadata["SIGFIB"])
+                    spectrum.n_good_visits = int(metadata["NVISITS"])
+                    spectrum.n_good_rvs = int(metadata["NVISITS"])
+                    spectrum.v_rad = float(metadata.get("VRAD", metadata.get("VHBARY")))
+                    spectrum.e_v_rad = float(metadata["VERR"])
+                    spectrum.std_v_rad = float(metadata["VSCATTER"])
+                    spectrum.median_e_v_rad = float(metadata.get("VERR_MED", np.nan))
+                    spectrum.spectrum_flags = metadata["STARFLAG"]
+                    spectrum.star_flags = metadata["STARFLAG"]
 
-                # The MJDS in the apStar file only list the MJDs that were included in the stack.
-                # But there could be other MJDs which were not included in the stack.
-                # TODO: To be consistent elsewhere we should probably not update these based on
-                spectrum.min_mjd = min(mjds)
-                spectrum.max_mjd = max(mjds)
+                    # The MJDS in the apStar file only list the MJDs that were included in the stack.
+                    # But there could be other MJDs which were not included in the stack.
+                    # TODO: To be consistent elsewhere we should probably not update these based on
+                    spectrum.min_mjd = min(mjds)
+                    spectrum.max_mjd = max(mjds)
 
-                star_kwds = dict(
-                    source_pk=spectrum.source_pk,
-                    release=spectrum.release,
-                    filetype=spectrum.filetype,
-                    apred=spectrum.apred,
-                    apstar=spectrum.apstar,
-                    obj=spectrum.obj,
-                    telescope=spectrum.telescope,
-                    #field=spectrum.field,
-                    #prefix=spectrum.prefix,
-                    #reduction=spectrum.obj if spectrum.telescope == "apo1m" else None
-                )
-                for i, sfile in enumerate(sfiles, start=1):
-                    #if spectrum.telescope != "apo1m":
-                    #    plate = sfile.split("-")[2]
-                    #else:
-                    #    # plate not known..
-                    #    plate = metadata["FIELD"].strip()
-                    mjd = int(sfile.split("-")[4])
-                    plate = sfile.split("-")[3]
-
-                    kwds = star_kwds.copy()
-                    kwds.update(
-                        mjd=mjd,
-                        fiber=int(metadata[f"FIBER{i}"]),
-                        plate=plate
+                    star_kwds = dict(
+                        source_pk=spectrum.source_pk,
+                        release=spectrum.release,
+                        filetype=spectrum.filetype,
+                        apred=spectrum.apred,
+                        apstar=spectrum.apstar,
+                        obj=spectrum.obj,
+                        telescope=spectrum.telescope,
+                        #field=spectrum.field,
+                        #prefix=spectrum.prefix,
+                        #reduction=spectrum.obj if spectrum.telescope == "apo1m" else None
                     )
-                    visit_spectrum_data.append(kwds)
+                    for i, sfile in enumerate(sfiles, start=1):
+                        #if spectrum.telescope != "apo1m":
+                        #    plate = sfile.split("-")[2]
+                        #else:
+                        #    # plate not known..
+                        #    plate = metadata["FIELD"].strip()
+                        mjd = int(sfile.split("-")[4])
+                        plate = sfile.split("-")[3]
 
-            collect_step.update(advance=1)
+                        kwds = star_kwds.copy()
+                        kwds.update(
+                            mjd=mjd,
+                            fiber=int(metadata[f"FIBER{i}"]),
+                            plate=plate
+                        )
+                        visit_spectrum_data.append(kwds)
+
+                collect_step.update(advance=1)
+    finally:
+        # Always tear down the worker pool; a leaked ProcessPoolExecutor can
+        # deadlock interpreter shutdown (especially under the 'fork' start
+        # method), which hangs the migration scheduler's process.join().
+        executor.shutdown(wait=True)
 
     with queue.subtask("Updating apStar metadata", total=total) as update_step:
         for chunk in chunked(apStar_spectra.values(), batch_size):

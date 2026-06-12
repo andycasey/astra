@@ -45,6 +45,9 @@ def merge_sources(keep_pk: int, remove_pk: int, database=None) -> None:
     :param remove_pk: The source pk to remove (will be deleted after migration)
     :param database: Optional database connection (defaults to astra database)
     """
+    if keep_pk == remove_pk:
+        return
+
     if database is None:
         from astra.models.base import database
 

@@ -598,10 +598,10 @@ def ferre(
     n_obj,
     n_threads,
     pipe,
-    max_sigma_outlier=10,
-    max_t_elapsed=600,
-    max_t_grid_load=600,
-    max_t_communicate=600,
+    max_sigma_outlier=None,  # 10,
+    max_t_elapsed=None,  # 600,
+    max_t_grid_load=None,  # 600,
+    max_t_communicate=None,  # 600,
     communicate_on_start=True
 ):
 

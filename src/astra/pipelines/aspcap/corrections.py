@@ -1598,6 +1598,13 @@ def get_ipl4v2_logg_corrections(logg_spec, mh, teff, maxiter=100, tol=1e-4):
                 break
         logg_cal[is_giant] = logg_est
 
+    ## HACK to skip the dwarfs for now
+    logg_cal = np.array(logg_est, dtype=float)
+    is_giant = np.ones_like(logg_cal, dtype=bool)
+    is_ms_dwarf = np.zeros_like(logg_cal, dtype=bool)
+    is_m_dwarf = np.zeros_like(logg_cal, dtype=bool)
+
+    """
     # MS dwarfs: DR19 correction
     logg_cal[is_ms_dwarf] = (logg_spec[is_ms_dwarf]
                              - (-0.947 + 1.886e-4 * teff[is_ms_dwarf]
@@ -1613,6 +1620,7 @@ def get_ipl4v2_logg_corrections(logg_spec, mh, teff, maxiter=100, tol=1e-4):
               + 4.0915239e-04 * z * t)
     md_cal[z < -0.6] = np.nan   # censor metal-poor M-dwarfs
     logg_cal[is_m_dwarf] = md_cal
+    """
 
     return logg_cal, is_giant, is_ms_dwarf, is_m_dwarf, n_iter
 

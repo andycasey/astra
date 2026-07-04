@@ -902,54 +902,54 @@ class TestApogeeVisitSpectrumPaths:
     def test_visit_spectrum_flag_bad(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         assert not r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_bad_pixels(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_bad_pixels = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_very_bright_neighbor(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_very_bright_neighbor = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_bad_rv(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_bad_rv_combination = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_rv_failure(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_rv_failure = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_warn_no_flags(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         assert not r.flag_warn
 
     def test_visit_spectrum_flag_warn_any_flag(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_commissioning = True
         assert r.flag_warn
 
     def test_visit_spectrum_many_flags(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         # Set multiple flags
         r.flag_bad_pixels = True
         r.flag_commissioning = True
@@ -965,7 +965,7 @@ class TestApogeeVisitSpectrumPaths:
     def test_visit_spectrum_persist_flags(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_persist_high = True
         assert r.flag_persist_high
         assert r.flag_warn

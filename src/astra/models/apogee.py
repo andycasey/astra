@@ -171,34 +171,33 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     #> Statistics and Spectrum Quality
     snr = FloatField(null=True)
     visit_flags = BitField(default=0)
-    spectrum_flags = BitField(default=0)
-
+    
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     # and https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/utils/bitmask.py#L9
-    flag_bad_pixels = spectrum_flags.flag(2**0)
-    flag_commissioning = spectrum_flags.flag(2**1)
-    flag_bright_neighbor = spectrum_flags.flag(2**2)
-    flag_very_bright_neighbor = spectrum_flags.flag(2**3)
-    flag_low_snr = spectrum_flags.flag(2**4)
+    flag_bad_pixels = visit_flags.flag(2**0)
+    flag_commissioning = visit_flags.flag(2**1)
+    flag_bright_neighbor = visit_flags.flag(2**2)
+    flag_very_bright_neighbor = visit_flags.flag(2**3)
+    flag_low_snr = visit_flags.flag(2**4)
     # 4-8 inclusive are not defined
-    flag_persist_high = spectrum_flags.flag(2**9)
-    flag_persist_med = spectrum_flags.flag(2**10)
-    flag_persist_low = spectrum_flags.flag(2**11)
-    flag_persist_jump_pos = spectrum_flags.flag(2**12)
-    flag_persist_jump_neg = spectrum_flags.flag(2**13)
+    flag_persist_high = visit_flags.flag(2**9)
+    flag_persist_med = visit_flags.flag(2**10)
+    flag_persist_low = visit_flags.flag(2**11)
+    flag_persist_jump_pos = visit_flags.flag(2**12)
+    flag_persist_jump_neg = visit_flags.flag(2**13)
     # 14-15 inclusive are not defined
-    flag_suspect_rv_combination = spectrum_flags.flag(2**16)
-    flag_suspect_broad_lines = spectrum_flags.flag(2**17)
-    flag_bad_rv_combination = spectrum_flags.flag(2**18)
-    flag_rv_reject = spectrum_flags.flag(2**19)
-    flag_rv_suspect = spectrum_flags.flag(2**20)
-    flag_multiple_suspect = spectrum_flags.flag(2**21)
-    flag_rv_failure = spectrum_flags.flag(2**22)
-    flag_suspect_rotation = spectrum_flags.flag(2**23)
-    flag_mtpflux_lt_75 = spectrum_flags.flag(2**24)
-    flag_mtpflux_lt_50 = spectrum_flags.flag(2**25)
-
-    flag_missing_or_corrupted_file = spectrum_flags.flag(2**26)
+    flag_suspect_rv_combination = visit_flags.flag(2**16)
+    flag_suspect_broad_lines = visit_flags.flag(2**17)
+    flag_bad_rv_combination = visit_flags.flag(2**18)
+    flag_rv_reject = visit_flags.flag(2**19)
+    flag_rv_suspect = visit_flags.flag(2**20)
+    flag_multiple_suspect = visit_flags.flag(2**21)
+    flag_rv_failure = visit_flags.flag(2**22)
+    flag_suspect_rotation = visit_flags.flag(2**23)
+    flag_mtpflux_lt_75 = visit_flags.flag(2**24)
+    flag_mtpflux_lt_50 = visit_flags.flag(2**25)
+    
+    flag_missing_or_corrupted_file = visit_flags.flag(2**26)
 
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True)
@@ -234,7 +233,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     @hybrid_property
     def flag_warn(self):
-        return (self.spectrum_flags > 0)
+        return (self.visit_flags > 0)
 
     @classmethod
     def get_path_template(cls, release, telescope):
@@ -470,9 +469,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     #> Summary Statistics
     snr = FloatField(null=True)
     mean_fiber = FloatField(null=True)
-    std_fiber = FloatField(null=True)
     star_flags = BitField(default=0)
-    spectrum_flags = BitField(default=0)
 
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True)

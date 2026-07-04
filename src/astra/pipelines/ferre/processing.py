@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from scipy.ndimage import binary_dilation
 from itertools import cycle
 from typing import Iterable, Optional
 from astra.pipelines.ferre.operator import post_execution_interpolation
@@ -343,7 +344,8 @@ def inflate_errors_at_bad_pixels(
 
     # Inflate errors around skylines,
     skyline_mask = (bitfield & 4096) > 0 # significant skyline
-    e_flux[skyline_mask] *= skyline_sigma_multiplier
+    near_sky = binary_dilation(skyline_mask, iterations=2)
+    e_flux[near_sky] *= skyline_sigma_multiplier
 
     # Sometimes FERRE will run forever.
     if spike_threshold_to_inflate_uncertainty > 0:
@@ -367,15 +369,16 @@ def inflate_errors_at_bad_pixels(
             #    n = np.sum(is_spike[pi])
             #    if n > 0:
             #        log.debug(f"  {n} pixels on spectrum index {pi}")
-        e_flux[is_spike] = bad_pixel_error_value
+        near_spike = binary_dilation(is_spike, iterations=2)
+        e_flux[near_spike] = bad_pixel_error_value
 
     # Set bad pixels to have no useful data.
     if bad_pixel_flux_value is not None or bad_pixel_error_value is not None:
         bad = (
             ~np.isfinite(flux)
             | ~np.isfinite(e_flux)
-            | (flux < 0)
-            | (e_flux < 0)
+            | (flux <= 0)
+            | (e_flux <= 0)
             | ((bitfield & 16639) > 0) # any bad value (level = 1)
         )
 

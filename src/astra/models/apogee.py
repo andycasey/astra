@@ -469,6 +469,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     #> Summary Statistics
     snr = FloatField(null=True)
     mean_fiber = FloatField(null=True)
+    std_fiber = FloatField(null=True)
     star_flags = BitField(default=0)
 
     #> Radial Velocity (Doppler)

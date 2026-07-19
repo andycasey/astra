@@ -691,7 +691,7 @@ def migrate_apogee_visits(
     max_rv_visit_pk, max_visit_pk = (0, 0)
     if incremental:
         max_rv_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.rv_visit_pk)).scalar() or 0
-        max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.spectrum_pk)).scalar() or 0
+        max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.visit_pk)).scalar() or 0
 
     if max_mjd is None:
         max_mjd = 1_000_000

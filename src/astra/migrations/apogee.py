@@ -734,6 +734,7 @@ def migrate_apogee_visits(
             RvVisit.xcorr_vrelerr,
             RvVisit.xcorr_vrad,
             RvVisit.n_components,
+            RvVisit.visitflag,
         )
         .join(
             ssq,
@@ -763,7 +764,7 @@ def migrate_apogee_visits(
             Visit.on_target,
             Visit.valid,
             Visit.snr,
-            Visit.visitflag.alias("visit_flags"),
+            sq.c.visitflag.alias("visit_flags"),
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
 

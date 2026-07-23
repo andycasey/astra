@@ -764,7 +764,7 @@ def migrate_apogee_visits(
             Visit.on_target,
             Visit.valid,
             Visit.snr,
-            fn.COALESCE(sq.c.visitflag, Visit.starflag).alias("visit_flags"),  # if no RV calculated, include flag from the visit
+            fn.COALESCE(sq.c.visitflag, Visit.visitflag).alias("visit_flags"),  # if no RV calculated, include flag from the visit
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
 

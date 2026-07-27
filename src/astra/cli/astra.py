@@ -261,11 +261,13 @@ def create(
     from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
     from astra.models.boss import BossVisitSpectrum
     from astra.models.mwm import (BossCombinedSpectrum, ApogeeCombinedSpectrum, BossRestFrameVisitSpectrum, ApogeeRestFrameVisitSpectrum)
+    from astra.models.source import Source
 
     mwmVisit_mwmStar_args = (
         create_mwmVisit_and_mwmStar_products,
         dict(
             task="astra.products.mwm.create_mwmVisit_and_mwmStar_products",
+            sources=Source.select(),
             batch_size=1,
             overwrite=overwrite
         )

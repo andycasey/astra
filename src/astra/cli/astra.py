@@ -267,7 +267,6 @@ def create(
         create_mwmVisit_and_mwmStar_products,
         dict(
             task="astra.products.mwm.create_mwmVisit_and_mwmStar_products",
-            sources=Source.select(),
             batch_size=1,
             overwrite=overwrite
         )

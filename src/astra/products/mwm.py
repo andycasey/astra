@@ -38,7 +38,7 @@ from astra.products.boss import prepare_boss_resampled_visit_and_coadd_spectra
 @task
 def create_mwmVisit_and_mwmStar_products(
     sources: Iterable[Source],
-    apreds: Optional[Iterable[str]] = ("1.5", "dr17"),
+    apreds: Optional[Iterable[str]] = ("t1.6l", "dr17"),
     run2ds: Optional[Iterable[str]] = ("v6_2_1", ),
     max_processes: Optional[int] = 4,
     overwrite: bool = True,

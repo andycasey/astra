@@ -105,13 +105,15 @@ def task(
     if n > 0:
         if write_to_database:
             timer.add_overheads(results)
-            try:
-                # Write any remaining results to the database.
-                yield from bulk_insert_or_replace_pipeline_results(results)
-            except:
-                log.exception(f"Exception trying to insert results to database:")
-                if re_raise_exceptions:
-                    raise
+            yield from bulk_insert_or_replace_pipeline_results(results)
+            # try:
+            #     # Write any remaining results to the database.
+            #     yield from bulk_insert_or_replace_pipeline_results(results)
+            # except:
+            #     raise
+            #     log.exception(f"Exception trying to insert results to database:")
+            #     if re_raise_exceptions:
+            #         raise
 
 
 def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=True):

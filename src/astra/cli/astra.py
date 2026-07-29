@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from typing_extensions import Annotated
 from enum import Enum
+import inspect
 
 app = typer.Typer()
 config_app = typer.Typer(help="Manage Astra configuration.")
@@ -267,6 +268,7 @@ def create(
         create_mwmVisit_and_mwmStar_products,
         dict(
             task="astra.products.mwm.create_mwmVisit_and_mwmStar_products",
+            sources=Source.select(),
             batch_size=1,
             overwrite=overwrite
         )
@@ -421,8 +423,13 @@ def create(
     for product in products:
         fun, kwargs = mapping[product]
         r = fun(limit=limit, **kwargs)
-        if isinstance(r, str):
+        if inspect.isgenerator(r):
+            for _ in r:
+                pass
+        elif isinstance(r, str):
             typer.echo(f"Created {product}: {r}")
+        else:
+            pass
 
 
 @app.command()

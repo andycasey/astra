@@ -851,6 +851,7 @@ def migrate(
     from astra.migrations.apogee import (
         migrate_apogee_spectra_from_sdss5_apogee_drpdb,
         migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb,
+        migrate_sdss4_dr17_apogee_coadded_spectra_from_visits,
         migrate_dithered_metadata,
         migrate_apogee_visits_in_apStar_files
     )
@@ -986,6 +987,17 @@ def migrate(
             depends_on={"gaia_source_ids"},
             writes_to={"source"}
         )
+        if apred == "dr17":
+            # Coadds are matched to sources via Source.sdss4_apogee_id, so this can only
+            # run after sdss4_apogee_id is populated -- NOT as part of the Phase 1
+            # apogee_spectra task, which runs before Source even exists.
+            tasks["dr17_coadds"] = MigrationTask(
+                name="dr17_coadds",
+                func=migrate_sdss4_dr17_apogee_coadded_spectra_from_visits,
+                description="Deriving APOGEE DR17 coadded spectra",
+                depends_on={"sdss4_apogee_id", "apogee_spectra"},
+                writes_to={"apogee_coadded_spectrum_in_ap_star"}
+            )
         tasks["gaia_astrometry"] = MigrationTask(
             name="gaia_astrometry",
             func=migrate_gaia_dr3_astrometry_and_photometry,

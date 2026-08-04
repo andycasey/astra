@@ -1155,7 +1155,31 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
         .where(ApogeeVisitSpectrum.spectrum_pk.is_null())
         .exists()
     )
+    queue.put(Ellipsis)
+    return None
 
+    
+def migrate_sdss4_dr17_apogee_coadded_spectra_from_visits(batch_size: Optional[int] = 10_000, queue=None):
+    """
+    Derive DR17 APOGEE coadded (apStar) spectra from already-ingested `ApogeeVisitSpectrum`
+    rows and `Source.sdss4_apogee_id`.
+ 
+    This MUST be run after both:
+      - `migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb` (populates ApogeeVisitSpectrum)
+      - `migrate_sdss4_apogee_id` (populates Source.sdss4_apogee_id)
+ 
+    since coadds are matched to sources via `Source.sdss4_apogee_id`. Calling this before
+    `Source.sdss4_apogee_id` is populated will silently produce zero coadded spectra --
+    the lookup dict will simply be empty and every row will fail to match.
+    """
+    from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.migrations.sdss5db.catalogdb import AllStar_DR17_synspec_rev1 as Star
+ 
+    if queue is None:
+        queue = ProgressContext()
+ 
     # Ingest ApogeeCoadded
     # Derive coadded spectra from already-ingested visit spectra (local DB) instead of
     # re-querying the remote catalogdb, which is much faster

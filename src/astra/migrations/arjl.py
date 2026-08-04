@@ -110,15 +110,35 @@ def ingest_arjl_dr17_spectra(
             dr17_x_h=visits["DR17_X_H"],
             dr17_vsini=visits["DR17_VSINI"],
         )
+
+        # iterate and only keep what has a source linking
+        # DELETE THIS ONCE HAVE PROPER MIGRATION!!!!!
+        keep = []
         for i, (spectrum_pk, sdss_id) in enumerate(enumerate_new_spectrum_pks(tqdm(rows_as_dict["sdss_id"]))):
-            source_pk = source_pk_to_sdss_id.get(sdss_id, None)
-            rows_as_dict["spectrum_pk"][i] = spectrum_pk
-            rows_as_dict["source_pk"][i] = source_pk
+            source_pk = source_pk_to_sdss_id.get(sdss_id)
+
             if source_pk is None:
                 n_unmatched += 1
+                continue
+
+            rows_as_dict["spectrum_pk"][i] = spectrum_pk
+            rows_as_dict["source_pk"][i] = source_pk
+            keep.append(i)
 
         for key in ("plate", "field", "obj"):
             rows_as_dict[key] = list(map(str.strip, rows_as_dict[key]))
+
+        rows_as_dict = {
+            key: np.asarray(value)[keep]
+            for key, value in rows_as_dict.items()
+        }
+
+        # for i, (spectrum_pk, sdss_id) in enumerate(enumerate_new_spectrum_pks(tqdm(rows_as_dict["sdss_id"]))):
+        #     source_pk = source_pk_to_sdss_id.get(sdss_id, None)
+        #     rows_as_dict["spectrum_pk"][i] = spectrum_pk
+        #     rows_as_dict["source_pk"][i] = source_pk
+        #     if source_pk is None:
+        #         n_unmatched += 1
 
         print(f"Found {n_unmatched} unmatched sources in {subdir}")
 

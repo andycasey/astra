@@ -135,7 +135,8 @@ def aspcap(
     """
 
     if spectra[0]._meta.name.startswith("arjl"):
-        header_paths = "$MWM_ASTRA/pipelines/aspcap/arjl_header_paths.list"
+        # header_paths = "$MWM_ASTRA/pipelines/aspcap/arjl_header_paths.list"  # did not have permission! CHNAGE LATER!
+        header_paths = "$MWM_ASTRA/ARjl_grids/arjl_header_paths.list"
         if initial_guess_callable is None:
             initial_guess_callable = get_initial_arjl_guesses
         kwargs.update(ferre_kwds=dict(continuum_order=2))

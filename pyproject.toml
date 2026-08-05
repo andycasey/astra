@@ -38,8 +38,8 @@ dependencies = [
   "dustmaps",
   "fitsio",
   "torch",
-  "astronn>=1.1.0",
-  "sdss-semaphore>=0.2.9",
+  "astronn",
+  "sdss-semaphore",
 ]
 #requires-python = ">= 3.9"
 

@@ -50,6 +50,53 @@ class ARJLFluxAccessor(BasePixelArrayAccessor):
         return self.field
 
 
+class ARJLStarLinesFluxAccessor(BasePixelArrayAccessor):
+
+    """A class to access ARJL pixel-based arrays (1 + x_starLines_v0, without the residuals term)."""
+
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            self._initialise_pixel_array(instance)
+            try:
+                return instance.__pixel_data__[self.name]
+            except KeyError:
+
+                x_starLines_v0 = _get_array(instance.component_dir, "x_starLines_v0", instance.row_index)
+
+                value = 1 + x_starLines_v0
+                if self.transform is not None:
+                    value = self.transform(value, None, instance)
+                instance.__pixel_data__.setdefault(self.name, value[125:])
+
+            finally:
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
+class ARJLStarLinesInverseVarianceAccessor(BasePixelArrayAccessor):
+
+    """A class to access ARJL pixel-based arrays (posterior uncertainty of x_starLines_v0)."""
+
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            self._initialise_pixel_array(instance)
+            try:
+                return instance.__pixel_data__[self.name]
+            except KeyError:
+                x_starLines_err_v0 = _get_array(instance.component_dir, "x_starLines_err_v0", instance.row_index)
+
+                value = 1 / x_starLines_err_v0**2
+                if self.transform is not None:
+                    value = self.transform(value, None, instance)
+                instance.__pixel_data__.setdefault(self.name, value[125:])
+
+            finally:
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
 class ARJLPixelFlagsAccessor(BasePixelArrayAccessor):
 
     """A class to access ARJL pixel-based arrays."""
@@ -171,16 +218,16 @@ class ARJLVisitSpectrum(BaseModel, SpectrumMixin):
             naxis=8575,
         ),
     )
+
+class ARJLTHVisitSpectrum(ARJLVisitSpectrum):
     flux = PixelArray(accessor_class=ARJLFluxAccessor)
     ivar = PixelArray(accessor_class=ARJLInverseVarianceAccessor)
     pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor)
 
-
-class ARJLTHVisitSpectrum(ARJLVisitSpectrum):
-    pass
-
 class ARJLDDVisitSpectrum(ARJLVisitSpectrum):
-    pass
+    flux = PixelArray(accessor_class=ARJLFluxAccessor)
+    ivar = PixelArray(accessor_class=ARJLInverseVarianceAccessor)
+    pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor)
 
 
 
@@ -217,6 +264,30 @@ class ARJLTHRestFrameVisitSpectrum(ARJLTHVisitSpectrum):
 class ARJLDDRestFrameVisitSpectrum(ARJLDDVisitSpectrum):
     flux = PixelArray(accessor_class=ARJLFluxAccessor, transform=transform_to_rest)
     ivar = PixelArray(accessor_class=ARJLInverseVarianceAccessor, transform=transform_to_rest)
+    pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor, transform=transform_to_rest)
+
+
+class ARJLTHStarLinesVisitSpectrum(ARJLTHVisitSpectrum):
+    flux = PixelArray(accessor_class=ARJLStarLinesFluxAccessor)
+    ivar = PixelArray(accessor_class=ARJLStarLinesInverseVarianceAccessor)
+    pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor)
+
+
+class ARJLDDStarLinesVisitSpectrum(ARJLDDVisitSpectrum):
+    flux = PixelArray(accessor_class=ARJLStarLinesFluxAccessor)
+    ivar = PixelArray(accessor_class=ARJLStarLinesInverseVarianceAccessor)
+    pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor)
+
+
+class ARJLTHStarLinesRestFrameVisitSpectrum(ARJLTHStarLinesVisitSpectrum):
+    flux = PixelArray(accessor_class=ARJLStarLinesFluxAccessor, transform=transform_to_rest)
+    ivar = PixelArray(accessor_class=ARJLStarLinesInverseVarianceAccessor, transform=transform_to_rest)
+    pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor, transform=transform_to_rest)
+
+
+class ARJLDDStarLinesRestFrameVisitSpectrum(ARJLDDStarLinesVisitSpectrum):
+    flux = PixelArray(accessor_class=ARJLStarLinesFluxAccessor, transform=transform_to_rest)
+    ivar = PixelArray(accessor_class=ARJLStarLinesInverseVarianceAccessor, transform=transform_to_rest)
     pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor, transform=transform_to_rest)
 
 

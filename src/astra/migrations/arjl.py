@@ -12,7 +12,9 @@ from astra.utils import dict_to_iterable
 from astra.models import Source
 from astra.models.arjl import (
     ARJLTHVisitSpectrum, ARJLDDVisitSpectrum,
-    ARJLTHRestFrameVisitSpectrum, ARJLDDRestFrameVisitSpectrum
+    ARJLTHRestFrameVisitSpectrum, ARJLDDRestFrameVisitSpectrum,
+    ARJLTHStarLinesVisitSpectrum, ARJLDDStarLinesVisitSpectrum,
+    ARJLTHStarLinesRestFrameVisitSpectrum, ARJLDDStarLinesRestFrameVisitSpectrum,
 )
 from astra.migrations.utils import enumerate_new_spectrum_pks
 
@@ -59,8 +61,14 @@ def ingest_arjl_dr17_spectra(
 
     # Ingest theory sepctra
     kinds = [
-        ("outdir_wu_th/", (ARJLTHVisitSpectrum, ARJLTHRestFrameVisitSpectrum)),
-        ("outdir_wu_dd/", (ARJLDDVisitSpectrum, ARJLDDRestFrameVisitSpectrum)),
+        ("outdir_wu_th/", (
+            ARJLTHVisitSpectrum, ARJLTHRestFrameVisitSpectrum,
+            ARJLTHStarLinesVisitSpectrum, ARJLTHStarLinesRestFrameVisitSpectrum,
+        )),
+        ("outdir_wu_dd/", (
+            ARJLDDVisitSpectrum, ARJLDDRestFrameVisitSpectrum,
+            ARJLDDStarLinesVisitSpectrum, ARJLDDStarLinesRestFrameVisitSpectrum,
+        )),
     ]
 
     flatten = lambda x: x.flatten()[0]

@@ -489,7 +489,8 @@ class ASPCAP(PipelineOutputMixin):
     flag_high_rchi2 = result_flags.flag(2**25, help_text="Reduced chi-squared is greater than 1000")
     flag_low_snr = result_flags.flag(2**26, help_text="S/N is less than 20")
     flag_high_std_v_rad = result_flags.flag(2**27, help_text="Standard deviation of v_rad is greater than 1 km/s")
-    
+    flag_m_h_atm_fe_h_mismatch = result_flags.flag(2**28, help_text="[M/H]_atm - [Fe/H] is greater than 0.1")
+
     @hybrid_property
     def flag_warn(self):
         return (self.result_flags > 0)
@@ -515,6 +516,7 @@ class ASPCAP(PipelineOutputMixin):
         |   self.flag_potential_ferre_timeout
         |   self.flag_no_suitable_initial_guess
         |   self.flag_spectrum_io_error
+        |   self.flag_m_h_atm_fe_h_mismatch
     )
 
     @flag_bad.expression
@@ -534,6 +536,7 @@ class ASPCAP(PipelineOutputMixin):
         |   self.flag_potential_ferre_timeout
         |   self.flag_no_suitable_initial_guess
         |   self.flag_spectrum_io_error
+        |   self.flag_m_h_atm_fe_h_mismatch
     )
 
     #> Initial parameters

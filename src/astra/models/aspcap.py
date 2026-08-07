@@ -49,7 +49,14 @@ class ASPCAPPixelArrayAccessor(BasePixelArrayAccessor):
                     species = label[:-2] if label.endswith("_h") else label
                     try:
                         masked_model_flux = instance._get_output_pixel_array(f"abundances", f"{species.title()}/rectified_model_flux.output")
-                    except FileNotFoundError:
+                    except (FileNotFoundError, LookupError, ValueError):
+                        # FileNotFoundError: this species was never run for this grid.
+                        # LookupError: FERRE silently dropped this star's row for this
+                        #   species entirely (see `_find_pixel_array_row`).
+                        # ValueError: the row was found, but its data is corrupted on
+                        #   disk (e.g. a partial/garbled write) and can't be parsed.
+                        # All three mean "no usable data for this star+species" -- fall
+                        # back to NaN rather than let one bad star take down the batch.
                         instance.__pixel_data__.setdefault(self.name, np.nan * np.ones(8575))
                     else:
                         instance.__pixel_data__.setdefault(self.name, instance._unmask_pixel_array(masked_model_flux))
@@ -680,14 +687,54 @@ class ASPCAP(PipelineOutputMixin):
     def _get_input_pixel_array(self, stage, name):
         return np.loadtxt(**self._get_pixel_array_kwds(stage, name))
 
+    def _find_pixel_array_row(self, stage, name):
+        """
+        Locate the row in a FERRE output file that corresponds to this instance by
+        matching the embedded (source_pk, spectrum_pk) identity, rather than assuming
+        the row's position matches `ferre_index`.
+
+        `ferre_index` records this spectrum's position in the FERRE *input* list. That
+        matches the *output* file's row position only if every row in the input made it
+        into the output -- if FERRE silently drops a different star's row somewhere
+        earlier in the same output file (e.g. a one-off numerical failure for one
+        abundance species), every subsequent row shifts by one and position-based
+        lookup silently returns the wrong star's data.
+        """
+        fname = f"{self.pwd}/{stage}/{self.short_grid_name}/{name}"
+        names = np.atleast_1d(np.loadtxt(fname, usecols=(0, ), dtype=str))
+        for row, row_name in enumerate(names):
+            try:
+                meta = parse_ferre_spectrum_name(row_name)
+            except Exception:
+                # A malformed/corrupted name in some other row shouldn't stop the search.
+                continue
+            if meta["source_pk"] == self.source_pk and meta["spectrum_pk"] == self.spectrum_pk:
+                return row
+        raise LookupError(f"no row in {fname} matches source_pk={self.source_pk}, spectrum_pk={self.spectrum_pk}")
+
     def _get_output_pixel_array(self, stage, name, P=7514):
         kwds = self._get_pixel_array_kwds(stage, name)
-        name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
-        array = np.loadtxt(usecols=range(1, 1+P), **kwds)
-        meta = parse_ferre_spectrum_name(name)
-        assert int(meta["source_pk"]) == self.source_pk
-        assert int(meta["spectrum_pk"]) == self.spectrum_pk
+        try:
+            row_name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
+            meta = parse_ferre_spectrum_name(row_name)
+            matched = (meta["source_pk"] == self.source_pk and meta["spectrum_pk"] == self.spectrum_pk)
+        except (ValueError, IndexError):
+            # skiprows landed past the end of the file, or the row there didn't parse
+            # as a valid FERRE spectrum name at all.
+            matched = False
+
+        if not matched:
+            # Position-based lookup landed on the wrong row, or off the end of the file
+            # entirely (see `_find_pixel_array_row`). Fall back to finding this spectrum
+            # by its embedded identity.
+            kwds["skiprows"] = self._find_pixel_array_row(stage, name)
+            row_name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
+            meta = parse_ferre_spectrum_name(row_name)
+
+        assert meta["source_pk"] == self.source_pk
+        assert meta["spectrum_pk"] == self.spectrum_pk
         assert int(meta["index"]) == self.ferre_index
+        array = np.loadtxt(usecols=range(1, 1+P), **kwds)
         return array
 
 

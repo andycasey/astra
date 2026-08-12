@@ -1,5 +1,6 @@
 
 from astropy.table import Table
+from collections import OrderedDict
 from glob import glob
 from peewee import chunked
 import numpy as np
@@ -15,6 +16,8 @@ from astra.models.arjl import (
     ARJLTHRestFrameVisitSpectrum, ARJLDDRestFrameVisitSpectrum,
     ARJLTHStarLinesVisitSpectrum, ARJLDDStarLinesVisitSpectrum,
     ARJLTHStarLinesRestFrameVisitSpectrum, ARJLDDStarLinesRestFrameVisitSpectrum,
+    ARJLTHCoaddedSpectrum, ARJLDDCoaddedSpectrum,
+    ARJLTHStarLinesCoaddedSpectrum, ARJLDDStarLinesCoaddedSpectrum,
 )
 from astra.migrations.utils import enumerate_new_spectrum_pks
 
@@ -172,85 +175,157 @@ def ingest_arjl_dr17_spectra(
                 .execute()
             )
 
+    # now add in the coadds
+    model_pairs = [(ARJLTHRestFrameVisitSpectrum, ARJLTHCoaddedSpectrum),
+                   (ARJLDDRestFrameVisitSpectrum, ARJLDDCoaddedSpectrum),
+                   (ARJLTHStarLinesRestFrameVisitSpectrum, ARJLTHStarLinesCoaddedSpectrum),
+                   (ARJLDDStarLinesRestFrameVisitSpectrum, ARJLDDStarLinesCoaddedSpectrum)]
+    for visit_model, coadd_model in model_pairs:
+        _ = build_arjl_coadds(visit_model, coadd_model)
 
 
-        '''
+def weighted_average(x, e_x):
+    """Inverse-variance weighted mean of `x`, given per-element uncertainties `e_x`."""
+    ivar = np.array(e_x) ** -2
+    sum_var = 1 / np.sum(ivar)
+    return (np.sum(x * ivar) * sum_var, np.sqrt(sum_var))
 
-        # --- Pre-load all h5 data ---
-        # Load full dataset into numpy first, then index — much faster than h5 fancy indexing
-        keys = ("x_starContinuum_v0", "x_starLines_v0", "x_residuals_v0", "fluxerr2")
 
-        print("Pre-loading h5 components...")
-        cache = {}
-        for key in keys:
-            print(f"  loading {key}...")
-            with h5.File(f"{subdir}/apMADGICS_out_{key}.h5", "r") as fp:
-                cache[key] = fp[key][:][indices]   # load all, index in numpy
+def build_arjl_coadds(visit_model, coadd_model, output_dir=None, batch_size=1000):
+    """
+    Build per-source, per-telescope coadds from ARJL rest-frame visit spectra.
 
-        RV = np.array(allVisits["RV_pixoff_final"])[indices].squeeze(-1)  # (N,)
+    DRAFT: see the open questions documented on `astra.models.arjl.ARJLCoaddedSpectrum`.
 
-        # --- Vectorized flux/ivar over all visits ---
-        print("Computing flux and ivar...")
-        all_flux = shift(
-            1
-            + cache["x_starLines_v0"]
-            + cache["x_residuals_v0"] / cache["x_starContinuum_v0"],
-            RV
-        )[:, 125:]  # (N, 8575)
+    Unlike BOSS/APOGEE, no resampling is needed here: the *RestFrame* visit models already
+    have `flux`/`ivar`/`pixel_flags` shifted onto the same integer-pixel log-lambda grid
+    (see `transform_to_rest` in `astra.models.arjl`), so combining visits for a source is
+    just a direct call to `pixel_weighted_spectrum`.
 
-        all_ivar_raw = shift(
-            (1 / cache["fluxerr2"]) * cache["x_starContinuum_v0"] ** 2,
-            RV
-        )[:, 125:]
-        all_ivar = np.where(np.isfinite(all_ivar_raw) & (all_ivar_raw > 0), 1.0 / all_ivar_raw, 0.0)
+    :param visit_model:
+        One of the ARJL *RestFrame* visit spectrum models (e.g. `ARJLTHRestFrameVisitSpectrum`).
 
-        bad = ~np.isfinite(all_flux)
-        all_ivar[bad] = 0.0
-        all_flux[bad] = 0.0
+    :param coadd_model:
+        The corresponding coadd model to populate (e.g. `ARJLTHCoaddedSpectrum`). Its
+        `coadd_basename` class attribute determines the HDF5 filename this run writes to,
+        so different `coadd_model`s sharing the same `output_dir` don't collide.
 
-        del cache  # free memory
+    :param output_dir: [optional]
+        Directory to write the new `coadd_model.coadd_basename` file (flux/ivar/pixel_flags,
+        one row per source/telescope) that the coadd model's pixel arrays will be read back
+        from. Defaults to `$MWM_ASTRA/{v_astra}/spectra/star`, the same top-level directory
+        that `mwmStar` files live under (but without the per-source `sdss_id_groups`
+        splitting, since this is one file for the whole batch, not one per source).
+    """
+    import os
+    from astropy.constants import c
+    from astropy import units as u
+    from astra import __version__
+    from astra.utils import expand_path
+    from astra.models.base import database
+    from astra.specutils.resampling import pixel_weighted_spectrum
 
-        # --- Combine visits per (SDSS_ID, TELESCOPE) group ---
-        λ = 10 ** (4.179 + 6e-6 * np.arange(8575))
+    if output_dir is None:
+        output_dir = expand_path(f"$MWM_ASTRA/{__version__}/spectra/star")
 
-        groups = allVisits_matched_include.group_by(["SDSS_ID", "TELESCOPE"]).groups
-        group_boundaries = groups.indices  # start index of each group
+    # v_rad_pix_var is "stellar RV uncertainty expressed as a variance in the pixel offset"
+    # (see the APMADGICS allVisit_MADGICS datamodel). Convert pixels -> km/s using the
+    # log-lambda grid's pixel scale (crval=4.179, cdelt=6e-6) to get a proper e_v_rad.
+    cdelt = 6e-6
+    km_s_per_pixel = c.to(u.km / u.s).value * np.log(10) * cdelt
 
-        n_groups = len(groups)
-        n_pixels = 8575
-        star_flux = np.zeros((n_groups, n_pixels))
-        star_ivar = np.zeros((n_groups, n_pixels))
-        star_meta = []
+    q = (
+        visit_model
+        .select()
+        .where(visit_model.source_pk.is_null(False))
+        .order_by(visit_model.source_pk.asc(), visit_model.telescope.asc(), visit_model.mjd.asc())
+    )
 
-        print("Combining visits...")
-        for i, group in enumerate(tqdm(groups)):
-            s = group_boundaries[i]
-            e = group_boundaries[i + 1]
+    groups = OrderedDict()
+    for visit in tqdm(q.iterator(), desc=f"Loading {visit_model.__name__}"):
+        groups.setdefault((visit.source_pk, visit.telescope), []).append(visit)
 
-            v_flux = all_flux[s:e]   # (n_visits, 8575)
-            v_ivar = all_ivar[s:e]
+    n_groups, n_pixels = (len(groups), 8575)
+    flux = np.zeros((n_groups, n_pixels))
+    ivar = np.zeros((n_groups, n_pixels))
+    pixel_flags = np.zeros((n_groups, n_pixels), dtype=np.int64)
 
-            s_ivar = np.sum(v_ivar, axis=0)
-            s_flux = np.sum(v_flux * v_ivar, axis=0)
+    rows = []
+    for row_index, ((source_pk, telescope), visits) in enumerate(tqdm(groups.items(), desc="Coadding")):
+        v_flux = np.array([v.flux for v in visits])
+        v_ivar = np.array([v.ivar for v in visits])
+        v_pixel_flags = np.array([v.pixel_flags for v in visits])
 
-            star_ivar[i] = s_ivar
-            star_flux[i] = np.where(s_ivar > 0, s_flux / s_ivar, 0.0)
+        stacked_flux, stacked_ivar, stacked_pixel_flags, *_ = pixel_weighted_spectrum(
+            v_flux, v_ivar, v_pixel_flags
+        )
+        flux[row_index] = stacked_flux
+        ivar[row_index] = stacked_ivar
+        pixel_flags[row_index] = stacked_pixel_flags
 
-            sdss_id   = group["SDSS_ID"][0][0]
-            telescope = group["TELESCOPE"][0]
+        with np.errstate(invalid="ignore"):
+            snr = stacked_flux * np.sqrt(stacked_ivar)
+        finite = np.isfinite(snr) & (stacked_ivar > 0)
 
-            star_meta.append(dict(
-                row_index=i,
-                sdss_id=sdss_id,
-                telescope=telescope,
-                n_visits=e - s,
-                drp_snr=np.sqrt(np.sum(allVisits_matched_include["DRP_SNR"][s:e] ** 2)),
-                dr17_teff=allVisits_matched_include["DR17_TEFF"][s],
-                dr17_logg=allVisits_matched_include["DR17_LOGG"][s],
-                dr17_m_h=allVisits_matched_include["DR17_M_H"][s],
-            ))
+        v_rads = np.array([v.v_rad for v in visits])
+        e_v_rads = np.sqrt(np.array([v.v_rad_pix_var for v in visits])) * km_s_per_pixel
+        fibers = np.array([v.fiber for v in visits])
 
-        print(f"Done. {n_groups} groups.")
+        finite_rv = np.isfinite(v_rads) & np.isfinite(e_v_rads) & (e_v_rads > 0)
+        if np.any(finite_rv):
+            v_rad, e_v_rad = weighted_average(v_rads[finite_rv], e_v_rads[finite_rv])
+        else:
+            v_rad, e_v_rad = (np.nan, np.nan)
 
-        # Save the star-level combined spectra somewhere in a hdf5 file
-        '''
+        rows.append(dict(
+            source_pk=source_pk,
+            sdss_id=visits[0].sdss_id,
+            catalogid=visits[0].catalogid,
+            release=visits[0].release,
+            v_arjl=visits[0].v_arjl,
+            telescope=telescope,
+            row_index=row_index,
+            component_dir=output_dir,
+            min_mjd=min(v.mjd for v in visits),
+            max_mjd=max(v.mjd for v in visits),
+            n_visits=len(visits),
+            n_good_visits=len(visits),  # TODO: define 'good' (see open questions)
+            snr=np.mean(snr[finite]) if np.any(finite) else np.nan,
+            mean_fiber=np.mean(fibers),
+            std_fiber=np.std(fibers),
+            v_rad=v_rad,
+            e_v_rad=e_v_rad,
+            std_v_rad=np.std(v_rads),
+            v_rad_flags=int(np.bitwise_or.reduce([int(v.v_rad_flags) for v in visits])),
+            drp_starflag=int(np.bitwise_or.reduce([int(v.drp_starflag) for v in visits])),
+        ))
+
+    # `row_index` is only meaningful because it's defined as "position in `rows`", which is
+    # also the position each spectrum was written to in `flux`/`ivar`/`pixel_flags` above.
+    # Guard that invariant explicitly, since nothing else enforces it.
+    assert [row["row_index"] for row in rows] == list(range(n_groups))
+
+    os.makedirs(output_dir, exist_ok=True)
+    with h5.File(f"{output_dir}/{coadd_model.coadd_basename}", "w") as fp:
+        fp.create_dataset("flux", data=flux)
+        fp.create_dataset("ivar", data=ivar)
+        fp.create_dataset("pixel_flags", data=pixel_flags)
+        # Identifying metadata in the same row order as the arrays above, so the file is
+        # self-describing: you can open it standalone and see which row is which star,
+        # rather than that mapping only existing implicitly via `row_index` in the DB.
+        fp.create_dataset("source_pk", data=np.array([row["source_pk"] for row in rows], dtype=np.int64))
+        fp.create_dataset("sdss_id", data=np.array([row["sdss_id"] for row in rows], dtype=np.int64))
+        fp.create_dataset(
+            "telescope",
+            data=np.array([row["telescope"] for row in rows], dtype=h5.string_dtype(encoding="utf-8")),
+        )
+
+    for spectrum_pk, row in enumerate_new_spectrum_pks(rows):
+        row["spectrum_pk"] = spectrum_pk
+
+    with database.atomic():
+        database.create_tables([coadd_model])
+        for chunk in chunked(rows, batch_size):
+            coadd_model.insert_many(chunk).execute()
+
+    return rows

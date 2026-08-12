@@ -291,4 +291,161 @@ class ARJLDDStarLinesRestFrameVisitSpectrum(ARJLDDStarLinesVisitSpectrum):
     pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor, transform=transform_to_rest)
 
 
-#class ARHJLTHCoaddedSpectrum()
+def _get_coadd_array(dir, basename, key, index):
+    with h5.File(f"{dir}/{basename}", "r") as fp:
+        return fp[key][index]
+
+
+class ARJLCoaddedPixelArrayAccessor(BasePixelArrayAccessor):
+
+    """
+    A class to access ARJL coadd pixel arrays (flux, ivar, pixel_flags).
+
+    Unlike the visit accessors above, this data doesn't come from the DRP's apMADGICS
+    outputs: it's computed by Astra itself (see `astra.migrations.arjl.build_arjl_coadds`)
+    and written to a small per-batch HDF5 file that we own, with one row per (source, telescope).
+
+    The filename comes from `instance.coadd_basename`, not from these accessor kwargs: TH/DD
+    and StarLines coadds are different tables (see the four leaf classes below), each writing
+    to its own file in the same `component_dir` so they don't collide with one another.
+    """
+
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            self._initialise_pixel_array(instance)
+            try:
+                return instance.__pixel_data__[self.name]
+            except KeyError:
+                value = _get_coadd_array(instance.component_dir, instance.coadd_basename, self.column_name, instance.row_index)
+                if self.transform is not None:
+                    value = self.transform(value, None, instance)
+                instance.__pixel_data__.setdefault(self.name, value)
+            finally:
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
+class ARJLCoaddedSpectrum(BaseModel, SpectrumMixin):
+
+    """
+    A per-source, per-telescope pixel-weighted coadd of ApogeeReduction.jl visit spectra.
+
+    DRAFT. Open questions before this is real:
+      - What defines a 'good' visit for `n_good_visits` / the RV statistics? (e.g. some cut
+        on `v_rad_flags`, `drp_starflag`, or `v_rad_chi2_residuals`)
+      - ARJL visit flux is already continuum-normalized, but that normalization may not be
+        consistent between exposures of the same star. Revisit whether visits need to be
+        rescaled before stacking (see `scale_by_pseudo_continuum` on `pixel_weighted_spectrum`).
+      - Do TH/DD and StarLines-only coadds deserve four near-identical tables (as with the
+        visit spectra), or should this collapse into one table with a `kind` column?
+      - Is per-telescope grouping the right key, or should apo25m/lco25m visits of the same
+        star ever be combined?
+    """
+
+    pk = AutoField()
+
+    # Not a DB column: which per-batch HDF5 file (in `component_dir`) this leaf model's
+    # pixel arrays live in. Every subclass below must set its own, distinct value so that
+    # TH/DD and StarLines coadds don't collide when they share the same `component_dir`.
+    coadd_basename = "arjlStarCoadd.h5"
+
+    #> Identifiers
+    spectrum_pk = ForeignKeyField(
+        Spectrum,
+        null=True,
+        index=True,
+        unique=True,
+        lazy_load=False,
+        column_name="spectrum_pk"
+    )
+    source = ForeignKeyField(
+        Source,
+        null=True,
+        index=True,
+        column_name="source_pk",
+        backref="arjl_coadded_spectra",
+    )
+
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
+    sdss_id = BigIntegerField(index=True, null=True)
+    catalogid = BigIntegerField(index=True, null=True)
+
+    #> Storage (see `ARJLCoaddedPixelArrayAccessor`)
+    component_dir = TextField(null=False)
+    row_index = IntegerField(index=True, null=False)
+    v_arjl = TextField(null=True)
+
+    #> Data Product Keywords
+    release = TextField(index=True)
+    telescope = TextField(index=True)
+
+    #> Observing Span
+    min_mjd = IntegerField(null=True)
+    max_mjd = IntegerField(null=True)
+
+    #> Number and Quality of Visits
+    n_visits = IntegerField(null=True)
+    n_good_visits = IntegerField(null=True)
+
+    #> Summary Statistics
+    snr = FloatField(null=True)
+    mean_fiber = FloatField(null=True)
+    std_fiber = FloatField(null=True)
+    v_rad_flags = BitField(default=0)  # bitwise-OR of visit v_rad_flags
+    drp_starflag = BitField(default=0)  # bitwise-OR of visit drp_starflag
+
+    #> Radial Velocity
+    # Inverse-variance weighted mean of visit v_rad, using v_rad_pix_var (converted from
+    # pixels to km/s) as the per-visit weight -- see weighted_average() in migrations/arjl.py.
+    v_rad = FloatField(null=True)
+    e_v_rad = FloatField(null=True)
+    std_v_rad = FloatField(null=True)
+
+    #> Spectral Data
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=4.179,
+            cdelt=6e-6,
+            naxis=8575,
+        ),
+    )
+    flux = PixelArray(accessor_class=ARJLCoaddedPixelArrayAccessor)
+    ivar = PixelArray(accessor_class=ARJLCoaddedPixelArrayAccessor)
+    pixel_flags = PixelArray(accessor_class=ARJLCoaddedPixelArrayAccessor)
+
+    class Meta:
+        indexes = (
+            (
+                (
+                    "sdss_id",
+                    "release",
+                    "v_arjl",
+                    "telescope",
+                ),
+                True,
+            ),
+        )
+
+
+class ARJLTHCoaddedSpectrum(ARJLCoaddedSpectrum):
+    """Coadd of `ARJLTHRestFrameVisitSpectrum` visits."""
+    coadd_basename = "arjlStarCoadd_th.h5"
+
+
+class ARJLDDCoaddedSpectrum(ARJLCoaddedSpectrum):
+    """Coadd of `ARJLDDRestFrameVisitSpectrum` visits."""
+    coadd_basename = "arjlStarCoadd_dd.h5"
+
+
+class ARJLTHStarLinesCoaddedSpectrum(ARJLCoaddedSpectrum):
+    """Coadd of `ARJLTHStarLinesRestFrameVisitSpectrum` visits."""
+    coadd_basename = "arjlStarCoadd_th_starlines.h5"
+
+
+class ARJLDDStarLinesCoaddedSpectrum(ARJLCoaddedSpectrum):
+    """Coadd of `ARJLDDStarLinesRestFrameVisitSpectrum` visits."""
+    coadd_basename = "arjlStarCoadd_dd_starlines.h5"

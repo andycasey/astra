@@ -421,7 +421,7 @@ def _create_pipeline_product(
     check_path(path, overwrite)
 
     kwds = dict(upper=upper, fill_values=fill_values)
-    hdus = [create_source_primary_hdu(source, upper=upper)]
+    hdus = [create_source_primary_hdu(source, upper=upper, pipeline=pipeline)]
     from astra import models as astra_models
     if isinstance(boss_spectrum_model, str):
         boss_spectrum_model = getattr(astra_models, boss_spectrum_model)

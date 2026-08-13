@@ -16,6 +16,10 @@ from astra.models.arjl import (
     ARJLDDStarLinesVisitSpectrum,
     ARJLTHStarLinesRestFrameVisitSpectrum,
     ARJLDDStarLinesRestFrameVisitSpectrum,
+    ARJLTHCoaddedSpectrum,
+    ARJLDDCoaddedSpectrum,
+    ARJLTHStarLinesCoaddedSpectrum,
+    ARJLDDStarLinesCoaddedSpectrum,
 )
 #from astra.models.aspcap import ASPCAP
 """

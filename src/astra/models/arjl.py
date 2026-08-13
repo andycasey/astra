@@ -404,6 +404,16 @@ class ARJLCoaddedSpectrum(BaseModel, SpectrumMixin):
     e_v_rad = FloatField(null=True)
     std_v_rad = FloatField(null=True)
 
+    #> APOGEE DR17 DRP Metadata
+    # Carried over from one of the coadded visits (it's a per-star crossmatch value, not
+    # per-visit, so it's the same across all visits of a star). ASPCAP's
+    # get_initial_arjl_guesses() reads these to seed its initial guess -- without them here,
+    # running aspcap on this model raises AttributeError before any FERRE work happens.
+    dr17_teff = FloatField(null=True)
+    dr17_logg = FloatField(null=True)
+    dr17_x_h = FloatField(null=True)
+    dr17_vsini = FloatField(null=True)
+
     #> Spectral Data
     wavelength = PixelArray(
         accessor_class=LogLambdaArrayAccessor,

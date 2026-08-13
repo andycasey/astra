@@ -284,6 +284,12 @@ def build_arjl_coadds(visit_model, coadd_model, output_dir=None, batch_size=1000
             release=visits[0].release,
             v_arjl=visits[0].v_arjl,
             telescope=telescope,
+            # A per-star crossmatch value, not per-visit, so any visit's copy will do.
+            # Needed by ASPCAP's get_initial_arjl_guesses() to seed its initial guess.
+            dr17_teff=visits[0].dr17_teff,
+            dr17_logg=visits[0].dr17_logg,
+            dr17_x_h=visits[0].dr17_x_h,
+            dr17_vsini=visits[0].dr17_vsini,
             row_index=row_index,
             component_dir=output_dir,
             min_mjd=min(v.mjd for v in visits),

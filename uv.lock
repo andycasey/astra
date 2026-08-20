@@ -424,7 +424,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "apache-airflow" },
-    { name = "astronn", specifier = ">=1.1.0" },
+    { name = "astronn" },
     { name = "astropy" },
     { name = "black", marker = "extra == 'dev'" },
     { name = "click" },
@@ -435,7 +435,7 @@ requires-dist = [
     { name = "healpy" },
     { name = "joblib" },
     { name = "matplotlib" },
-    { name = "numpy" },
+    { name = "numpy", specifier = "<2.3" },
     { name = "pandas" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -444,7 +444,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "scikit-learn" },
     { name = "scipy", specifier = "<1.15.0" },
-    { name = "sdss-semaphore", specifier = ">=0.2.9" },
+    { name = "sdss-semaphore" },
     { name = "sdssdb" },
     { name = "sdsstools" },
     { name = "specutils" },

@@ -16,7 +16,7 @@ maintainers = [
   {name = "Andy Casey", email = "andrew.casey@monash.edu"},
 ]
 dependencies = [
-  "numpy",
+  "numpy<2.3", # required by scipy<1.15.0
   "scipy<1.15.0", # https://github.com/scipy/scipy/issues/22325#issuecomment-2676345163
   "astropy",
   "tqdm",

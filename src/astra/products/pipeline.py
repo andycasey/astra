@@ -593,6 +593,7 @@ def _create_pipeline_products_for_all_sources(
         q = q.where(boss_where)
     elif apogee_where is not None:
         q = q.where(apogee_where)
+    q = q.order_by(Source.pk)
 
     if page is not None and limit is not None:
         q = q.paginate(page, limit)

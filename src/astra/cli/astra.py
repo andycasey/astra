@@ -454,6 +454,8 @@ def srun(
     exclusive: Annotated[bool, typer.Option(help="Use exclusive node allocation.")] = True,
     only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
     pipeline: Annotated[str, typer.Option(help="Pipeline name, for tasks parameterized by pipeline (e.g. `ASPCAP`).")] = None,
+    apreds: Annotated[List[str], typer.Option(help="APOGEE reduction version(s), for tasks that accept an `apreds` parameter.")] = None,
+    run2ds: Annotated[List[str], typer.Option(help="BOSS reduction version(s), for tasks that accept a `run2ds` parameter.")] = None,
 ):
     """Distribute an Astra task over many nodes using Slurm."""
 
@@ -565,14 +567,18 @@ def srun(
                 else:
                     sdss_id_str = " ".join(map(str, sdss_ids))
 
+                only_missing_flag = " --only-missing" if only_missing else ""
+                pipeline_flag = f" --pipeline {pipeline}" if pipeline is not None else ""
+                apreds_flag = "".join(f" --apreds {a}" for a in apreds) if apreds else ""
+                run2ds_flag = "".join(f" --run2ds {r}" for r in run2ds) if run2ds else ""
+                extra_flags = f"{only_missing_flag}{pipeline_flag}{apreds_flag}{run2ds_flag}"
+
                 # TODO: Let's not hard code this here.
                 commands = ["export CLUSTER=1"]
                 for page in range(n * procs, (n + 1) * procs):
                     status_path = f"{td}/live-{n}-{page}"
                     status_path_locks[progress][status_path] = 0
-                    only_missing_flag = " --only-missing" if only_missing else ""
-                    pipeline_flag = f" --pipeline {pipeline}" if pipeline is not None else ""
-                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1}{only_missing_flag}{pipeline_flag} --live-renderable-path {status_path} &")
+                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1}{extra_flags} --live-renderable-path {status_path} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -668,6 +674,8 @@ def run(
     dry_run: Annotated[bool, typer.Option(help="Print the queries that would be run without executing them.")] = False,
     only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
     pipeline: Annotated[str, typer.Option(help="Pipeline name, for tasks parameterized by pipeline (e.g. `ASPCAP`).")] = None,
+    apreds: Annotated[List[str], typer.Option(help="APOGEE reduction version(s), for tasks that accept an `apreds` parameter.")] = None,
+    run2ds: Annotated[List[str], typer.Option(help="BOSS reduction version(s), for tasks that accept a `run2ds` parameter.")] = None,
 ):
     """Run an Astra task on spectra."""
 
@@ -754,7 +762,13 @@ def run(
     )
     from time import sleep
 
-    extra_kwargs = {} if pipeline is None else {"pipeline": pipeline}
+    extra_kwargs = {}
+    if pipeline is not None:
+        extra_kwargs["pipeline"] = pipeline
+    if apreds:
+        extra_kwargs["apreds"] = apreds
+    if run2ds:
+        extra_kwargs["run2ds"] = run2ds
 
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
         for model, q in iterable:

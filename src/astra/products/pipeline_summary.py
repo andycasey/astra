@@ -131,7 +131,7 @@ def create_astra_best_product(
     if where: # Need to check, otherwise it requires AND with previous where.
         q = q.where(where)
 
-    q = q.limit(limit).dicts()
+    q = q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
 
     hdu = get_binary_table_hdu(
         q,
@@ -315,7 +315,7 @@ def create_all_star_product(
         if instrument_where:
             q = q.where(instrument_where)
 
-        q = q.limit(limit).dicts()
+        q = q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
 
         hdu = get_binary_table_hdu(
             q,
@@ -537,7 +537,7 @@ def create_all_visit_product(
         if instrument_where:
             q = q.where(instrument_where)
 
-        q = q.limit(limit).dicts()
+        q = q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
 
         hdu = get_binary_table_hdu(
             q,

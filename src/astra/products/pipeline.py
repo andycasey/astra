@@ -14,7 +14,8 @@ from astra.products.utils import (
     create_source_primary_hdu,
     get_fields_and_pixel_arrays, get_basic_header,
     fits_column_kwargs, get_fill_value, check_path, resolve_model,
-    add_category_headers, add_category_comments, dispersion_array
+    add_category_headers, add_category_comments, dispersion_array,
+    create_source_primary_hdu_cards, create_source_primary_hdu_from_cards
 )
 
 ASTRA_STAR_TEMPLATE = "astraStar{pipeline}-{version}-{sdss_id}.fits"

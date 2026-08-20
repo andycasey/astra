@@ -141,6 +141,15 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
     except AttributeError:
         first_conflict_target = model.source_pk
         first_conflict_target_name = "source_pk"
+
+    # Some status tables (e.g. `AstraSpectrumProductStatus`) are additionally scoped by
+    # `pipeline`, since one source/spectrum can have rows for many different pipelines. The
+    # unique constraint (and therefore the ON CONFLICT target) must include it too, or the
+    # upsert fails to match any constraint at all.
+    conflict_target = [first_conflict_target, model.v_astra_major_minor]
+    if hasattr(model, "pipeline"):
+        conflict_target.append(model.pipeline)
+
     # We cannot guarantee that the order of the RETURNING clause will be the same as the input order.
     # We need the `task_pk` generated, and we need (`spectrum_pk`, `v_astra`) to map to the results list, and we need
     # `created` so that we can attach it to the object.
@@ -155,7 +164,7 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
                 model.created
             )
             .on_conflict(
-                conflict_target=[first_conflict_target, model.v_astra_major_minor],
+                conflict_target=conflict_target,
                 preserve=preserve
             )
             .tuples()
@@ -207,6 +216,7 @@ def generate_queries_for_task(
     limit=None,
     page=None,
     missing_only=False,
+    pipeline=None,
 ):
     """
     Generate queries for input data that need to be processed by the given task.
@@ -229,6 +239,10 @@ def generate_queries_for_task(
     :param missing_only: [optional]
         If True, only include rows that are missing from the output model.
         Otherwise, things will be included if they have a more recent modified time.
+
+    :param pipeline: [optional]
+        If given, and the task's output model has a `pipeline` field, only rows for this
+        pipeline will count as an existing output when deciding what still needs processing.
     """
     from astra.models.source import Source
     from astra.models.spectrum import Spectrum
@@ -257,17 +271,18 @@ def generate_queries_for_task(
 
             if sdss_ids is not None:
                 where &= (Source.sdss_id.in_(sdss_ids))
+
+            on = (
+                (output_model.v_astra_major_minor == current_version)
+            &   (Source.pk == output_model.source_pk)
+            )
+            if pipeline is not None and hasattr(output_model, "pipeline"):
+                on &= (output_model.pipeline == pipeline)
+
             q = (
                 Source
                 .select()
-                .join(
-                    output_model,
-                    JOIN.LEFT_OUTER,
-                    on=(
-                        (output_model.v_astra_major_minor == current_version)
-                    &   (Source.pk == output_model.source_pk)
-                    )
-                )
+                .join(output_model, JOIN.LEFT_OUTER, on=on)
                 .where(where)
                 .order_by(Source.modified.desc(), Source.pk)
             )
@@ -283,6 +298,9 @@ def generate_queries_for_task(
                 (output_model.v_astra_major_minor == current_version)
             &   (input_model.spectrum_pk == output_model.spectrum_pk)
             )
+            if pipeline is not None and hasattr(output_model, "pipeline"):
+                on &= (output_model.pipeline == pipeline)
+
             q = (
                 input_model
                 .select(input_model, Source)

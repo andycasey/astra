@@ -179,7 +179,7 @@ def _create_mwmVisit_and_mwmStar_products(
         exists = os.path.exists(mwmStar_path) or os.path.exists(mwmVisit_path)
         t_path_check += time()
         if not overwrite and exists:
-            return (source.pk, True, os.path.exists(mwmVisit_path), os.path.exists(mwmStar_path))
+            return (source.pk, False, os.path.exists(mwmVisit_path), os.path.exists(mwmStar_path))
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=VerifyWarning)

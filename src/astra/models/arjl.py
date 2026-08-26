@@ -268,8 +268,11 @@ class ARJLDDRestFrameVisitSpectrum(ARJLDDVisitSpectrum):
 
 
 class ARJLTHStarLinesVisitSpectrum(ARJLTHVisitSpectrum):
+    # ivar uses ARJLInverseVarianceAccessor (same as ARJLTHVisitSpectrum), not
+    # ARJLStarLinesInverseVarianceAccessor: the posterior uncertainty of x_starLines_v0
+    # badly underestimates the true errors, so we borrow the TH error model as a stand-in.
     flux = PixelArray(accessor_class=ARJLStarLinesFluxAccessor)
-    ivar = PixelArray(accessor_class=ARJLStarLinesInverseVarianceAccessor)
+    ivar = PixelArray(accessor_class=ARJLInverseVarianceAccessor)
     pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor)
 
 
@@ -281,7 +284,7 @@ class ARJLDDStarLinesVisitSpectrum(ARJLDDVisitSpectrum):
 
 class ARJLTHStarLinesRestFrameVisitSpectrum(ARJLTHStarLinesVisitSpectrum):
     flux = PixelArray(accessor_class=ARJLStarLinesFluxAccessor, transform=transform_to_rest)
-    ivar = PixelArray(accessor_class=ARJLStarLinesInverseVarianceAccessor, transform=transform_to_rest)
+    ivar = PixelArray(accessor_class=ARJLInverseVarianceAccessor, transform=transform_to_rest)
     pixel_flags = PixelArray(accessor_class=ARJLPixelFlagsAccessor, transform=transform_to_rest)
 
 

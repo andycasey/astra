@@ -20,7 +20,7 @@ from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
 from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances, Source
 from astra.models.spectrum import Spectrum
 from astra.pipelines.ferre.processing import pre_process_ferre, post_process_ferre
-from astra.pipelines.ferre.utils import parse_header_path
+from astra.pipelines.ferre.utils import parse_header_path, parse_ferre_spectrum_name
 from astra.pipelines.aspcap.initial import get_initial_guesses, get_initial_arjl_guesses
 from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters_stage
 from astra.pipelines.aspcap.stellar_parameters import plan_stellar_parameters_stage
@@ -856,15 +856,15 @@ def ferre(
                 # Send back the spectrum causing the hanging.
 
                 try:
-                    parameter_input_path = os.path.join(os.path.dirname(input_nml_path), "parameter.input")
+                    parameter_input_path = os.path.join(cwd, "parameter.input")
                     input_names = np.loadtxt(parameter_input_path, usecols=(0, ), dtype=str)
 
                     for index_1_based in t_awaiting.keys():
                         parsed = parse_ferre_spectrum_name(input_names[int(index_1_based) - 1])
                         pipe.send(dict(timeout_on_spectrum_pk=parsed["spectrum_pk"]))
 
-                except:
-                    None
+                except Exception as e:
+                    debugger(f"exception reporting timeout spectra: {e}")
 
                 debugger(t_awaiting)
                 debugger(f"done hanging")

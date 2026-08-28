@@ -751,7 +751,10 @@ def ferre(
                 with state_lock:
                     t_elapsed.setdefault(key, [])
                     try:
-                        t = t_awaiting.pop(int(match.group(1))) + time()
+                        # The leading counter FERRE prints on a completion line is not the object
+                        # index, so it cannot be used to clear the entry that `next object #` added.
+                        # The object name is authoritative: its prefix is the index in parameter.input.
+                        t = t_awaiting.pop(int(key.split("_")[0]) + 1) + time()
                     except:
                         t = np.nan
                     t_elapsed[key].append(t)

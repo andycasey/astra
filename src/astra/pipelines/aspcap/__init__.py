@@ -19,7 +19,7 @@ from astra.utils import log, expand_path
 from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
 from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances, Source
 from astra.models.spectrum import Spectrum
-from astra.pipelines.ferre.processing import pre_process_ferre, post_process_ferre
+from astra.pipelines.ferre.processing import pre_process_ferre, post_process_ferre, re_process_partial_ferre, merge_partial_ferre_outputs
 from astra.pipelines.ferre.utils import parse_header_path, parse_ferre_spectrum_name
 from astra.pipelines.aspcap.initial import get_initial_guesses, get_initial_arjl_guesses
 from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters_stage
@@ -603,7 +603,9 @@ def ferre(
     max_t_elapsed=1000,  # 600,
     max_t_grid_load=1000,  # 600,
     max_t_communicate=1000,  # 600,
-    communicate_on_start=True
+    communicate_on_start=True,
+    max_resume_attempts=5,
+    _resume_attempt=0,
 ):
 
     try:
@@ -851,13 +853,11 @@ def ferre(
                         t_elapsed[k].extend(v)
 
             else:
-                # Just kill the process. Don't bother with the failed things.
-                # TODO: Send back which items we were waiting on at the time, so we can mark them as the problematic ones.
                 debugger(f"hanging on {input_nml_path} {cwd} {return_code} {t_overhead} {t_elapsed}")
                 # Note that we don't need to send n_processes=-1 because we already sent it above before we wrote out stdout/stderr
-                pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete))
-                # Send back the spectrum causing the hanging.
 
+                # Report the spectra that were being waited on when we killed FERRE, so they can be
+                # flagged as having caused the timeout.
                 try:
                     parameter_input_path = os.path.join(cwd, "parameter.input")
                     input_names = np.loadtxt(parameter_input_path, usecols=(0, ), dtype=str)
@@ -868,6 +868,66 @@ def ferre(
 
                 except Exception as e:
                     debugger(f"exception reporting timeout spectra: {e}")
+
+                # Resume the remainder in a new FERRE execution, excluding the objects that hung.
+                # Without this we would abandon every object that had not been reached yet, which for
+                # a large grid can be thousands of spectra lost because one or two of them stalled.
+                new_input_nml_path = None
+                if _resume_attempt < max_resume_attempts and (n_complete > 0 or exclude_indices):
+                    try:
+                        new_input_nml_path, ignore_names = re_process_partial_ferre(
+                            input_nml_path, cwd, exclude_indices=exclude_indices
+                        )
+                    except Exception as e:
+                        debugger(f"exception preparing resume for {input_nml_path}: {e}")
+                        new_input_nml_path = None
+                else:
+                    debugger(
+                        f"not resuming {input_nml_path}: attempt {_resume_attempt}/{max_resume_attempts}, "
+                        f"n_complete={n_complete}, n_excluded={len(exclude_indices)}"
+                    )
+
+                if new_input_nml_path is None:
+                    # Nothing left to run (or we have given up). Close out the progress for whatever
+                    # never ran, otherwise the caller waits on objects that will never be reported.
+                    pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete))
+                else:
+                    n_remaining = n_obj - len(set(ignore_names))
+                    debugger(
+                        f"resuming {new_input_nml_path} with {n_remaining} objects "
+                        f"(excluded {len(exclude_indices)}, attempt {_resume_attempt + 1}/{max_resume_attempts})"
+                    )
+                    # Account for the objects we are permanently abandoning, then release our threads
+                    # so the resumed process can take them.
+                    n_abandoned = n_obj - n_complete - n_remaining
+                    if n_abandoned > 0:
+                        pipe.send(dict(input_nml_path=input_nml_path, n_complete=n_abandoned))
+                    pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release))
+
+                    *_, this_t_overhead, this_t_elapsed = ferre(
+                        new_input_nml_path,
+                        cwd,
+                        n_remaining,
+                        n_threads,
+                        pipe,
+                        max_sigma_outlier=max_sigma_outlier,
+                        max_t_elapsed=max_t_elapsed,
+                        max_t_grid_load=max_t_grid_load,
+                        max_t_communicate=max_t_communicate,
+                        max_resume_attempts=max_resume_attempts,
+                        _resume_attempt=_resume_attempt + 1,
+                    )
+                    t_overhead = (t_overhead or 0) + (this_t_overhead or 0)
+                    for k, v in this_t_elapsed.items():
+                        t_elapsed.setdefault(k, [])
+                        t_elapsed[k].extend(v)
+
+                    # Post-processing only reads the output files named by the original input file,
+                    # so fold the resumed results back into them.
+                    try:
+                        merge_partial_ferre_outputs(input_nml_path, new_input_nml_path, cwd)
+                    except Exception as e:
+                        debugger(f"exception merging resumed outputs for {input_nml_path}: {e}")
 
                 debugger(t_awaiting)
                 debugger(f"done hanging")

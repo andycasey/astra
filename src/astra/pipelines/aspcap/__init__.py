@@ -601,7 +601,8 @@ def ferre(
     pipe,
     max_sigma_outlier=10,  # 10,
     max_t_elapsed=1000,  # 600,
-    max_t_grid_load=1000,  # 600,
+    max_t_grid_load=3600,  # 600, 1000 -- raised: loading the largest grids (~30GB) has been observed
+                            # taking up to ~1600s, leaving little margin at 1000s against normal I/O variance.
     max_t_communicate=1000,  # 600,
     communicate_on_start=True,
     max_resume_attempts=5,
@@ -640,7 +641,10 @@ def ferre(
 
                     debugger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting_snapshot} in {cwd}")
 
-                    if (max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
+                    # Only applies once dispatch has begun (t_overhead is set) -- t_last_communication is
+                    # never refreshed during grid loading, so before that this would fire off the same
+                    # clock as max_t_grid_load and could kill a slow-but-legitimate load on its own.
+                    if (t_overhead is not None and max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
                         debugger(f"hanging no communication")
                         ferre_hanging.set()
                         try:

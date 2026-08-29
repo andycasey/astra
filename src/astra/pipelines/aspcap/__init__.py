@@ -609,9 +609,18 @@ def ferre(
     _resume_attempt=0,
 ):
 
+    # Whether the process slot this call is responsible for has been handed back yet -- either by us,
+    # or by a resumed sub-run we delegated it to. The bare `except` below uses this to avoid leaking
+    # the slot (which would wedge the dispatch loop at capacity) without double-releasing it.
+    # Declared outside the try so it is always bound, even if we fail immediately.
+    # communicate_on_start=False means the caller already sent the +1, so we owe a release from the
+    # very first instruction; otherwise we owe nothing until our own +1 below succeeds.
+    slot_released = communicate_on_start
+
     try:
         if communicate_on_start:
             pipe.send(dict(input_nml_path=input_nml_path, n_processes=1, n_loading=1, n_threads=max(0, n_threads)))
+            slot_released = False
 
         is_list_mode = _is_list_mode(input_nml_path)
 
@@ -785,7 +794,11 @@ def ferre(
         process.stdout.close()
         process.stderr.close()
 
-        pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1))
+        # n_processes=-1 (releasing the process slot) is sent explicitly in each branch below rather
+        # than unconditionally here, because a hang that leads to a resume is the SAME logical job
+        # continuing -- releasing the slot here and re-acquiring it when the resume starts would open
+        # a window where the dispatch loop can hand the "freed" slot to a completely different job,
+        # exceeding max_processes for as long as both run concurrently.
 
         with open(os.path.join(cwd, f"stdout"), "w") as fp:
             fp.write("".join(stdout))
@@ -820,7 +833,8 @@ def ferre(
                 suffix = (int(suffix) + 1) if suffix != "" else 1
                 new_path = f"{prefix}.nml.{suffix}"
 
-                # Release these threads and process so it's balanced out when the sub-ferre process takes them
+                # Release these threads so it's balanced out when the sub-ferre process takes them. The
+                # process slot itself is deliberately NOT released here -- see the note above.
                 pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads))
 
                 # Need to check if the last two NML list paths had the same number of rows.
@@ -849,16 +863,23 @@ def ferre(
                     with open(new_path, "w") as fp:
                         fp.write("\n".join(unprocessed_input_nml_paths))
 
-                    *_, this_t_overhead, this_t_elapsed = ferre(new_path, cwd, n_obj - n_complete + n_spectra_done_in_last_execution, n_threads, pipe, max_sigma_outlier, max_t_elapsed)
+                    # Re-declare the loading/thread need for the resumed sub-run, but not n_processes
+                    # (see the note above) -- communicate_on_start=False suppresses its own declaration.
+                    pipe.send(dict(input_nml_path=input_nml_path, n_loading=1, n_threads=n_threads))
+                    *_, this_t_overhead, this_t_elapsed = ferre(new_path, cwd, n_obj - n_complete + n_spectra_done_in_last_execution, n_threads, pipe, max_sigma_outlier, max_t_elapsed, communicate_on_start=False)
+                    slot_released = True  # the resumed sub-run owns the release now
 
                     t_overhead = (t_overhead or 0) + this_t_overhead
                     for k, v in this_t_elapsed.items():
                         t_elapsed.setdefault(k, [])
                         t_elapsed[k].extend(v)
+                else:
+                    # Nothing left after infinite-loop trimming -- truly done, release the process slot.
+                    pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1))
+                    slot_released = True
 
             else:
                 debugger(f"hanging on {input_nml_path} {cwd} {return_code} {t_overhead} {t_elapsed}")
-                # Note that we don't need to send n_processes=-1 because we already sent it above before we wrote out stdout/stderr
 
                 # Report the spectra that were being waited on when we killed FERRE, so they can be
                 # flagged as having caused the timeout.
@@ -893,8 +914,9 @@ def ferre(
 
                 if new_input_nml_path is None:
                     # Nothing left to run (or we have given up). Close out the progress for whatever
-                    # never ran, otherwise the caller waits on objects that will never be reported.
-                    pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete))
+                    # never ran, and release the process slot -- this really is done now.
+                    pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete, n_processes=-1))
+                    slot_released = True
                 else:
                     n_remaining = n_obj - len(set(ignore_names))
                     debugger(
@@ -902,11 +924,13 @@ def ferre(
                         f"(excluded {len(exclude_indices)}, attempt {_resume_attempt + 1}/{max_resume_attempts})"
                     )
                     # Account for the objects we are permanently abandoning, then release our threads
-                    # so the resumed process can take them.
+                    # so the resumed process can take them. The process slot itself is NOT released
+                    # (no n_processes=-1) -- this is the same logical job continuing, not a new one.
                     n_abandoned = n_obj - n_complete - n_remaining
                     if n_abandoned > 0:
                         pipe.send(dict(input_nml_path=input_nml_path, n_complete=n_abandoned))
                     pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release))
+                    pipe.send(dict(input_nml_path=input_nml_path, n_loading=1, n_threads=n_threads))
 
                     *_, this_t_overhead, this_t_elapsed = ferre(
                         new_input_nml_path,
@@ -920,7 +944,9 @@ def ferre(
                         max_t_communicate=max_t_communicate,
                         max_resume_attempts=max_resume_attempts,
                         _resume_attempt=_resume_attempt + 1,
+                        communicate_on_start=False,
                     )
+                    slot_released = True  # the resumed sub-run owns the release now
                     t_overhead = (t_overhead or 0) + (this_t_overhead or 0)
                     for k, v in this_t_elapsed.items():
                         t_elapsed.setdefault(k, [])
@@ -939,12 +965,25 @@ def ferre(
         else:
             # Close out the process in case we didn't grep all the targets from stdout
             # e.g.: /uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/spectro/astra/0.7.0/pipelines/aspcap/2025-02-23-nl4_j6g0/params/lco25m_d_GKd
-            pipe.send(dict(input_nml_path=input_nml_path, n_complete=n_obj - n_complete))
+            pipe.send(dict(input_nml_path=input_nml_path, n_complete=n_obj - n_complete, n_processes=-1))
+            slot_released = True
 
 
         # Set ferre_hanging to kill the daemon thread.
         ferre_hanging.set()
         return (input_nml_path, cwd, return_code, t_overhead, t_elapsed)
     except:
-        ferre_hanging.set()
-        return (input_nml_path, cwd, -10, t_overhead, t_elapsed)
+        # Release first, and defensively: an unreleased slot permanently reduces the dispatch loop's
+        # capacity and can deadlock it, so this must not be skipped because some later cleanup step
+        # raised (e.g. a name that was never bound if we failed early). Guarded by slot_released so we
+        # never double-release one already handed back, or handed off to a resumed sub-run.
+        try:
+            if not slot_released:
+                pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1))
+        except:
+            None
+        try:
+            ferre_hanging.set()
+        except:
+            None
+        return (input_nml_path, cwd, -10, locals().get("t_overhead"), locals().get("t_elapsed") or {})

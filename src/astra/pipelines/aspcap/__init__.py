@@ -591,6 +591,10 @@ def _aspcap_stage(
 
 REGEX_NEXT_OBJECT = re.compile(r"next object #\s+(\d+)")
 REGEX_COMPLETED = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
+# Marks the beginning of a stretch in which FERRE is legitimately silent: its startup banner (printed
+# once per execution, and once per entry in list (-l) mode) and the end of the grid load, after which
+# every thread is busy on its first object and nothing has completed yet.
+REGEX_EXECUTION_START = re.compile(r"f e r r e\s+v|Done reading")
 
 
 def ferre(
@@ -604,6 +608,7 @@ def ferre(
     max_t_grid_load=3600,  # 600, 1000 -- raised: loading the largest grids (~30GB) has been observed
                             # taking up to ~1600s, leaving little margin at 1000s against normal I/O variance.
     max_t_communicate=1000,  # 600,
+    max_t_communicate_first_result=3600,
     communicate_on_start=True,
     max_resume_attempts=5,
     _resume_attempt=0,
@@ -628,6 +633,11 @@ def ferre(
         stdout, n_complete, t_start, t_last_communication, t_overhead, t_awaiting, t_elapsed, exclude_indices, n_threads_to_release = ([], 0, time(), time(), None, {}, {}, [], max(0, n_threads))
         # Guards concurrent access to t_awaiting and t_elapsed between the main reader loop and the monitor thread.
         state_lock = threading.Lock()
+        # True while we are between the start of a (sub-)execution and its first completed object.
+        # Silence is expected in that window -- the grid load produces no output, and afterwards every
+        # thread is busy on its first fit with nothing finished yet -- so it gets a much larger
+        # communication budget than the steady state, where completions and dispatches interleave.
+        awaiting_first_result = True
 
         command = ["ferre.x"]
         if is_list_mode:
@@ -650,11 +660,15 @@ def ferre(
 
                     debugger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting_snapshot} in {cwd}")
 
-                    # Only applies once dispatch has begun (t_overhead is set) -- t_last_communication is
-                    # never refreshed during grid loading, so before that this would fire off the same
-                    # clock as max_t_grid_load and could kill a slow-but-legitimate load on its own.
-                    if (t_overhead is not None and max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
-                        debugger(f"hanging no communication")
+                    # Two-phase budget. Before a (sub-)execution's first result, silence is expected
+                    # and its duration scales with grid size and NTHREADS, so allow much longer;
+                    # afterwards completions and dispatches interleave continuously and a long gap
+                    # really does mean trouble. Keying off awaiting_first_result rather than
+                    # t_overhead matters for list (-l) mode, where every entry reloads the grid and
+                    # has its own silent first wave, but t_overhead is only ever set once.
+                    budget = max_t_communicate_first_result if awaiting_first_result else max_t_communicate
+                    if (budget is not None and (time() - t_last_communication) > budget):
+                        debugger(f"hanging no communication (awaiting_first_result={awaiting_first_result}, budget={budget})")
                         ferre_hanging.set()
                         try:
                             process.kill()
@@ -751,6 +765,14 @@ def ferre(
         while True:
             line = process.stdout.readline()
 
+            if REGEX_EXECUTION_START.search(line):
+                # A new (sub-)execution is starting, or has just finished loading its grid. Either
+                # way an expected silent stretch follows, so restart the clock on the larger budget.
+                # In list (-l) mode this happens once per entry, which is what keeps the elements
+                # after the first from being killed during their own grid loads.
+                t_last_communication = time()
+                awaiting_first_result = True
+
             if match := REGEX_NEXT_OBJECT.search(line):
                 t_last_communication = time()
                 with state_lock:
@@ -761,6 +783,8 @@ def ferre(
 
             if match := REGEX_COMPLETED.search(line):
                 t_last_communication = time()
+                # Results are flowing for this (sub-)execution: tighten to the steady-state budget.
+                awaiting_first_result = False
 
                 key = match.group(2)
                 with state_lock:
@@ -942,6 +966,7 @@ def ferre(
                         max_t_elapsed=max_t_elapsed,
                         max_t_grid_load=max_t_grid_load,
                         max_t_communicate=max_t_communicate,
+                        max_t_communicate_first_result=max_t_communicate_first_result,
                         max_resume_attempts=max_resume_attempts,
                         _resume_attempt=_resume_attempt + 1,
                         communicate_on_start=False,

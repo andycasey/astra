@@ -6,6 +6,7 @@ import re
 import json
 import fcntl
 import pickle
+import traceback
 from multiprocessing import Pipe, Lock
 from datetime import datetime
 from tempfile import mkdtemp
@@ -41,8 +42,22 @@ def _safe_pre_process_ferre(*args, **kwargs):
     try:
         return pre_process_ferre(*args, **kwargs)
     except Exception as e:
-        debugger(f"Exception in pre_process_ferre {args} {kwargs}: {e}")
-        #input_nml_path, pwd, n_obj, n_ferre_threads, skipped
+        # Return the exception rather than falling through to an implicit None. The caller
+        # unpacks this result into a 5-tuple, so a None turned any failure here into
+        # `TypeError: cannot unpack non-iterable NoneType object` two layers away, which the
+        # @task wrapper then logged and swallowed -- so a full disk produced a run that
+        # reported success while writing nothing.
+        try:
+            pwd = args[0][0]["pwd"]
+        except Exception:
+            pwd = "(unknown pwd)"
+        # Log the pwd and traceback, not the whole plan: a plan holds thousands of spectra
+        # and dumping it buries the actual error in tens of kilobytes of repr.
+        debugger(
+            f"Exception in pre_process_ferre for {pwd}: "
+            f"{e.__class__.__name__}: {e}\n{traceback.format_exc()}"
+        )
+        return e
 
 
 def _safe_post_process_ferre(*args, **kwargs):
@@ -397,6 +412,7 @@ def _aspcap_stage(
     pre_processed_futures, ferre_futures, post_processed_futures = ([], [], [])
     n_started_executions, n_planned_executions, timings = (0, len(plans), {})
     spectrum_primary_keys_causing_timeout = []
+    pre_process_exceptions = []
 
     at_capacity = lambda p, t, c: (
         p >= max_processes,
@@ -521,7 +537,15 @@ def _aspcap_stage(
         except IndexError:
             continue
         else:
-            input_nml_path, pwd, n_obj, n_ferre_threads, skipped = future.result()
+            result = future.result()
+            if isinstance(result, Exception):
+                # Pre-processing failed for this plan, so there is nothing to hand to FERRE.
+                # Count it as started so this loop still terminates, and keep the exception
+                # so the stage can fail loudly below rather than quietly yielding nothing.
+                pre_process_exceptions.append(result)
+                n_started_executions += 1
+                continue
+            input_nml_path, pwd, n_obj, n_ferre_threads, skipped = result
 
             # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
             for spectrum, kwds in skipped:
@@ -586,6 +610,16 @@ def _aspcap_stage(
     else:
         pb.__exit__(None, None, None)
     debugger(f"_aspcap_stage[{stage}] about to return: {len(successes)} successes, {len(failures)} failures")
+    if pre_process_exceptions:
+        # A pre-processing failure means those spectra produced no results at all. Returning
+        # normally here is what allowed a full disk to look like a successful run, so surface
+        # it -- keeping the first real exception as the cause.
+        first = pre_process_exceptions[0]
+        raise RuntimeError(
+            f"ASPCAP {stage}: pre-processing failed for {len(pre_process_exceptions)} of "
+            f"{n_planned_executions} execution plan(s); those spectra have no results. "
+            f"First error: {first.__class__.__name__}: {first}"
+        ) from first
     return (successes, list(failures.values()))
 
 

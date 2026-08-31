@@ -694,6 +694,14 @@ def ferre(
                         if (
                         (len(t_awaiting_snapshot) > 0)
                         and (max_t_elapsed is not None or max_sigma_outlier is not None)
+                        # This test compares each object's wait time against the median/stddev of
+                        # completed objects -- before the first result, there is no such
+                        # distribution to compare against (median/stddev below are a hardcoded
+                        # fallback, not measured), so any wait looks like an arbitrarily large
+                        # outlier. That is the same failure mode max_t_communicate_first_result
+                        # exists for; skip this test until it has real data, and let that budget be
+                        # the sole guard for the pre-first-result window.
+                        and not awaiting_first_result
                         ):
 
                             if len(t_elapsed_per_spectrum_execution) == 0:

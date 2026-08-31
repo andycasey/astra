@@ -367,7 +367,7 @@ def flag_upper_limits_by_hayes_2022():
 
     elements = set(coeff["Element"])
     N_elements = len(elements)
-    elements = ("P", "C", "Ce", "Cu", "N", "Na", "Nd", "O", "S", "V")
+    elements = ("P", "Ce", "Cu", "Na", "Nd", "S", "V")
     T = 5
     with tqdm(total=T * N_elements) as pb:
         for element in elements:

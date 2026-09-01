@@ -630,6 +630,20 @@ REGEX_COMPLETED = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids st
 # every thread is busy on its first object and nothing has completed yet.
 REGEX_EXECUTION_START = re.compile(r"f e r r e\s+v|Done reading")
 
+# Minimum number of completed objects before the median/stddev of their fit times describes a
+# real distribution. With a single completion np.std is exactly 0, and the old absolute 10s
+# floor then made the sigma test roughly 100x too sensitive on a ~1000s median: everything in
+# a synchronized wave crossed "10 sigma" within seconds of each other and was permanently
+# abandoned. Below this many samples the test is skipped entirely and max_t_communicate stays
+# the guard against a genuinely dead process.
+MIN_OUTLIER_SAMPLES = 10
+
+# Floor the spread relative to the median rather than at an absolute 10s. Healthy batches
+# measure a spread of 20-35% of the median, so 25% sits inside the real distribution -- it will
+# not loosen the test where genuine statistics exist, but it stops the degenerate collapse when
+# every observed completion happened to take about the same time.
+MIN_RELATIVE_STDDEV = 0.25
+
 
 def ferre(
     input_nml_path,
@@ -738,14 +752,36 @@ def ferre(
                         and not awaiting_first_result
                         ):
 
-                            if len(t_elapsed_per_spectrum_execution) == 0:
-                                median = 120.0
-                                stddev = 10.0
+                            # A completion whose `next object #` entry could not be matched records
+                            # NaN (see where t_elapsed is appended). Those carry no timing
+                            # information, and one of them would otherwise turn the median and
+                            # stddev of the whole sample into NaN -- which, since nothing ever
+                            # removes them, would disable this watchdog for the rest of the
+                            # execution. Judge on the samples that actually measured something.
+                            finite_samples = [
+                                t for t in t_elapsed_per_spectrum_execution if np.isfinite(t)
+                            ]
+                            n_samples = len(finite_samples)
+                            if n_samples == 0:
+                                median = stddev = np.nan
                             else:
-                                median = np.median(t_elapsed_per_spectrum_execution)
-                                stddev = np.std(t_elapsed_per_spectrum_execution)
-                                if stddev == 0:
-                                    stddev = 10.0
+                                median = np.median(finite_samples)
+                                stddev = np.std(finite_samples)
+
+                            # Only judge outliers once the completed sample actually describes a
+                            # distribution. `awaiting_first_result` covers the zero-completion case;
+                            # this covers the barely-any-completions case, which is just as
+                            # degenerate -- one completion gives stddev 0, and the old 10s floor
+                            # then flagged an entire healthy 127-object wave at once.
+                            if not (
+                                n_samples >= MIN_OUTLIER_SAMPLES
+                                and np.isfinite(median)
+                                and np.isfinite(stddev)
+                            ):
+                                sleep(1)
+                                continue
+
+                            stddev = max(stddev, MIN_RELATIVE_STDDEV * median)
 
                             t_awaiting_elapsed = { k: (time() + v) for k, v in t_awaiting_snapshot.items() }
                             if not t_awaiting_elapsed:

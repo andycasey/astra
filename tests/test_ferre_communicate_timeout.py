@@ -110,7 +110,7 @@ class _FakeProcess:
 
 def run_ferre(
     lines, stall_after, max_t_communicate, max_t_communicate_first_result,
-    max_t_elapsed=None, max_sigma_outlier=None,
+    max_t_elapsed=None, max_sigma_outlier=None, n_obj=10,
 ):
     """
     Drive ferre() against a faked subprocess; returns (result, elapsed_seconds).
@@ -133,7 +133,7 @@ def run_ferre(
 
     with tempfile.TemporaryDirectory() as directory:
         with open(os.path.join(directory, "parameter.input"), "w") as fp:
-            for i in range(10):
+            for i in range(n_obj):
                 fp.write(f"{i}_100{i}_200{i}_0_None   0.0 0.0 0.0 0.0 0.0 0.0 0.0 5000.0\n")
         input_nml_path = os.path.join(directory, "input.nml")
         open(input_nml_path, "w").close()
@@ -147,7 +147,7 @@ def run_ferre(
             aspcap.ferre(
                 input_nml_path,
                 directory,
-                n_obj=10,
+                n_obj=n_obj,
                 n_threads=8,
                 pipe=RecordingPipe(),
                 communicate_on_start=True,
@@ -323,21 +323,141 @@ def test_outlier_watchdog_does_not_fire_before_first_result():
     assert elapsed > 4, f"expected a real stall of >4s, only took {elapsed:.1f}s"
 
 
-def test_outlier_watchdog_still_fires_after_first_result():
-    """A real outlier, once real completion-time data exists, must still be caught promptly."""
-    lines = [
-        FERRE_BANNER,
-        DONE_READING,
-        " next object #         1\n",
-        "           1 0_1000_2000_0_None\n",   # first result -> real median/stddev now exist
-        " next object #         2\n",
-    ]
+def test_outlier_watchdog_still_fires_once_real_completion_data_exists():
+    """
+    A real outlier must still be caught promptly once genuine completion-time data exists.
+
+    This covers the `max_sigma_outlier=None` route, where the absolute `max_t_elapsed` cap is the
+    only condition. Note the sample size: an earlier version of this test used a single completion
+    and asserted the watchdog fired, which encoded the very bug that cost GKd its abundances --
+    one sample gives stddev 0 and cannot support an outlier judgement at all.
+    """
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 13)]
+    lines += [f"          {i} {i-1}_100{i-1}_200{i-1}_0_None\n" for i in range(1, 11)]
+
     result, _ = run_ferre(
-        lines, stall_after=5,
+        lines, stall_after=len(lines),
         max_t_communicate=60, max_t_communicate_first_result=60,
         max_t_elapsed=1, max_sigma_outlier=None,
+        n_obj=12,
     )
     assert result.outlier_fired, (
-        "once a result has been reported, an object exceeding max_t_elapsed should still be "
-        "flagged -- this watchdog must only be suppressed before the first result, not always"
+        "with a real completed sample, an object exceeding max_t_elapsed should still be flagged "
+        "-- this watchdog must be suppressed only while the sample is degenerate, not always"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Small-sample degeneracy in the sigma-outlier test
+#
+# `awaiting_first_result` covers the zero-completion case. These cover the case that actually
+# destroyed data in the 2026-08-31 run: a *handful* of completions, which is just as degenerate.
+#
+# GKd params dispatched 707 objects. Exactly one completed (at 1079.9s -- these fits are genuinely
+# that slow). np.std of a single sample is 0, which the old code replaced with an absolute 10.0.
+# The sigma test then read "10 sigma" as median + 100s = ~1180s, and since the whole wave had been
+# dispatched together and all of it was passing 1180s at once, 126 perfectly healthy objects were
+# flagged in a single event and permanently abandoned. That happened 43 times across the run --
+# 127 objects each -- which is what left GKd's abundances at ~50% NaN on every element.
+#
+# The times below are scaled down to keep the suite fast; the mechanism (one completion arming a
+# statistical test) is identical.
+# ---------------------------------------------------------------------------
+
+def test_a_single_completion_does_not_arm_the_outlier_test():
+    """
+    One completion, then a stall with objects still waiting. The old code armed the sigma test off
+    that single sample and flagged the whole waiting set; it must now stay quiet.
+    """
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 13)]
+    lines += ["           1 0_1000_2000_0_None\n"]          # exactly one result
+
+    result, _ = run_ferre(
+        lines,
+        stall_after=len(lines),
+        max_t_communicate=60,
+        max_t_communicate_first_result=60,
+        max_t_elapsed=1,
+        max_sigma_outlier=0.1,   # scaled so a short stall would trip a degenerate stddev
+        n_obj=12,
+    )
+    assert not result.outlier_fired, (
+        "a single completion is not a distribution: stddev collapses to 0 and the old absolute "
+        "floor made every still-waiting object look like a large outlier"
+    )
+    assert not result.communicate_fired, "the communicate budget was generous; it must not fire"
+
+
+def test_enough_completions_still_catch_a_real_straggler():
+    """The guard must not disable the watchdog: with a real sample, a genuine outlier still dies."""
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 15)]
+    # MIN_OUTLIER_SAMPLES completions, so median/stddev describe something real.
+    lines += [f"          {i} {i-1}_100{i-1}_200{i-1}_0_None\n" for i in range(1, 11)]
+
+    result, _ = run_ferre(
+        lines,
+        stall_after=len(lines),
+        max_t_communicate=60,
+        max_t_communicate_first_result=60,
+        max_t_elapsed=1,
+        max_sigma_outlier=0.1,
+        n_obj=14,
+    )
+    assert result.outlier_fired, (
+        "with a real completed sample the outlier test must still fire on objects left waiting"
+    )
+
+
+def test_minimum_sample_threshold_is_above_one():
+    """A sample of one can never be a distribution -- pin that the constant reflects it."""
+    from astra.pipelines.aspcap import MIN_OUTLIER_SAMPLES
+    assert MIN_OUTLIER_SAMPLES > 1
+
+
+def test_stddev_floor_scales_with_the_median_not_an_absolute_10s():
+    """
+    The floor must be relative. GKd params completions clustered near 1080s; an absolute 10s floor
+    put "10 sigma" only 100s above the median, inside the natural spread of a synchronized wave.
+    Measured healthy batches show a spread of 20-35% of the median, so the floor belongs there.
+    """
+    from astra.pipelines.aspcap import MIN_RELATIVE_STDDEV
+
+    median = 1080.0          # observed GKd params completion time
+    max_sigma_outlier = 10   # the production setting
+
+    old_threshold = median + max_sigma_outlier * 10.0        # absolute floor
+    new_threshold = median + max_sigma_outlier * max(0.0, MIN_RELATIVE_STDDEV * median)
+
+    assert old_threshold < 1200, "the old floor sat inside the wave's own spread"
+    assert new_threshold > 3 * median, "the floor must scale with the timescale being measured"
+
+
+def test_unmatched_completions_do_not_disable_the_outlier_test():
+    """
+    A completion whose `next object #` entry cannot be matched records NaN as its elapsed time.
+    Nothing ever removes those, so if they were allowed into the median/stddev the whole sample
+    would evaluate to NaN and this watchdog would be off for the rest of the execution. The real
+    2026-08-31 run logged 6439 such `nan nan` evaluations, so this is the common case, not an edge.
+
+    Here the completion names deliberately do not correspond to dispatched indices, which is what
+    drives the NaN path, alongside enough well-formed completions to arm the test.
+    """
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 15)]
+    # Unmatchable completions -> NaN elapsed times mixed in with real ones.
+    lines += [f"          {i} 99{i}_9000_9000_0_None\n" for i in range(1, 4)]
+    lines += [f"          {i} {i-1}_100{i-1}_200{i-1}_0_None\n" for i in range(1, 11)]
+
+    result, _ = run_ferre(
+        lines, stall_after=len(lines),
+        max_t_communicate=60, max_t_communicate_first_result=60,
+        max_t_elapsed=1, max_sigma_outlier=None,
+        n_obj=14,
+    )
+    assert result.outlier_fired, (
+        "NaN elapsed times must be ignored, not allowed to poison the distribution and silently "
+        "switch the watchdog off"
     )

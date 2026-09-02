@@ -21,7 +21,7 @@ from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
 from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances, Source
 from astra.models.spectrum import Spectrum
 from astra.pipelines.ferre.processing import pre_process_ferre, post_process_ferre, re_process_partial_ferre, merge_partial_ferre_outputs
-from astra.pipelines.ferre.utils import parse_header_path, parse_ferre_spectrum_name
+from astra.pipelines.ferre.utils import parse_header_path, parse_ferre_spectrum_name, read_control_file
 from astra.pipelines.aspcap.initial import get_initial_guesses, get_initial_arjl_guesses
 from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters_stage
 from astra.pipelines.aspcap.stellar_parameters import plan_stellar_parameters_stage
@@ -986,10 +986,41 @@ def ferre(
                 # Report the spectra that were being waited on when we killed FERRE, so they can be
                 # flagged as having caused the timeout.
                 try:
-                    parameter_input_path = os.path.join(cwd, "parameter.input")
+                    if is_list_mode:
+                        # input_nml_path is itself a list file whose lines point to per-element
+                        # sub-.nml files (Al/input.nml, C/input.nml, ...), each with its own PFILE
+                        # relative to its own subdirectory -- there is no cwd/parameter.input here.
+                        # n_execution identifies which list entry was in progress (same logic used
+                        # to resume at "unprocessed_input_nml_paths" above). If it's still 0, nothing
+                        # in the list ever produced a completion (e.g. died during the first grid
+                        # load) and there's no reliable way to name which element was active.
+                        if n_execution == 0:
+                            raise RuntimeError("no completions yet in list mode; cannot identify active sub-execution")
+                        with open(input_nml_path, "r") as fp:
+                            list_paths = list(map(str.strip, fp.readlines()))
+                        active_nml_path = os.path.join(cwd, list_paths[n_execution - 1])
+                    else:
+                        # Non-list mode, including resumed sub-runs: input_nml_path IS the .nml
+                        # actually executed (e.g. foo.nml.1 on a resume), so its own PFILE is
+                        # authoritative -- a resumed run's PFILE is parameter.input.1, a filtered
+                        # subset, not the original parameter.input.
+                        active_nml_path = input_nml_path
+
+                    active_pwd = os.path.dirname(active_nml_path)
+                    control_kwds = read_control_file(active_nml_path)
+                    parameter_input_path = os.path.join(active_pwd, control_kwds["PFILE"])
                     input_names = np.loadtxt(parameter_input_path, usecols=(0, ), dtype=str)
 
-                    for index_1_based in t_awaiting.keys():
+                    # Flag only the spectra actually identified as the cause (exclude_indices, from
+                    # the sigma-outlier test) when we have them. When the kill instead came from
+                    # max_t_communicate/max_t_communicate_first_result there is no named culprit, so
+                    # fall back to flagging everything still in flight.
+                    if exclude_indices:
+                        keys_to_flag = [i + 1 for i in exclude_indices if (i + 1) in t_awaiting]
+                    else:
+                        keys_to_flag = list(t_awaiting.keys())
+
+                    for index_1_based in keys_to_flag:
                         parsed = parse_ferre_spectrum_name(input_names[int(index_1_based) - 1])
                         pipe.send(dict(timeout_on_spectrum_pk=parsed["spectrum_pk"]))
 

@@ -309,7 +309,7 @@ def aspcap(
                 coarse_n_m_atm=coarse.n_m,
                 coarse_rchi2=coarse.rchi2,
                 coarse_penalized_rchi2=coarse.penalized_rchi2,
-                coarse_result_flags=coarse.ferre_flags,
+                coarse_ferre_flags=coarse.ferre_flags,
                 coarse_short_grid_name=coarse.short_grid_name,
                 initial_teff=coarse.initial_teff,
                 initial_logg=coarse.initial_logg,

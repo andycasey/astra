@@ -482,6 +482,8 @@ class ASPCAP(PipelineOutputMixin):
     flag_low_snr = result_flags.flag(2**26, help_text="S/N is less than 20")
     flag_high_std_v_rad = result_flags.flag(2**27, help_text="Standard deviation of v_rad is greater than 1 km/s")
     flag_m_h_atm_fe_h_mismatch = result_flags.flag(2**28, help_text="[M/H]_atm - [Fe/H] is greater than 0.1")
+    flag_caused_timeout = result_flags.flag(2**29, help_text="Caused timeout in downstream tasks")
+    flag_affected_by_timeout = result_flags.flag(2**30, help_text="Affected by timeout")
 
     @hybrid_property
     def flag_warn(self):
@@ -551,31 +553,39 @@ class ASPCAP(PipelineOutputMixin):
     coarse_c_m_atm = FloatField(null=True, help_text=Glossary.coarse_c_m_atm)
     coarse_n_m_atm = FloatField(null=True, help_text=Glossary.coarse_n_m_atm)
     coarse_ferre_flags = BitField(default=0, help_text="FERRE flags for coarse grid")
-    flag_ferre_fail = coarse_ferre_flags.flag(2**0, help_text="FERRE failed")
-    flag_missing_model_flux = coarse_ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = coarse_ferre_flags.flag(2**2, help_text="Potentially impacted by FERRE timeout")
-    flag_no_suitable_initial_guess = coarse_ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-    flag_spectrum_io_error = coarse_ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
-    flag_teff_grid_edge_warn = coarse_ferre_flags.flag(2**5)
-    flag_teff_grid_edge_bad = coarse_ferre_flags.flag(2**6)
-    flag_logg_grid_edge_warn = coarse_ferre_flags.flag(2**7)
-    flag_logg_grid_edge_bad = coarse_ferre_flags.flag(2**8)
-    flag_v_micro_grid_edge_warn = coarse_ferre_flags.flag(2**9)
-    flag_v_micro_grid_edge_bad = coarse_ferre_flags.flag(2**10)
-    flag_v_sini_grid_edge_warn = coarse_ferre_flags.flag(2**11)
-    flag_v_sini_grid_edge_bad = coarse_ferre_flags.flag(2**12)
-    flag_m_h_atm_grid_edge_warn = coarse_ferre_flags.flag(2**13)
-    flag_m_h_atm_grid_edge_bad = coarse_ferre_flags.flag(2**14)
-    flag_alpha_m_grid_edge_warn = coarse_ferre_flags.flag(2**15)
-    flag_alpha_m_grid_edge_bad = coarse_ferre_flags.flag(2**16)
-    flag_c_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**17)
-    flag_c_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**18)
-    flag_n_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**19)
-    flag_n_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**20)    
-    flag_caused_timeout = coarse_ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
-    flag_multiple_equally_good_coarse_results = coarse_ferre_flags.flag(2**22, help_text="Multiple equally good coarse results")
-    flag_no_good_coarse_result = coarse_ferre_flags.flag(2**23, "No good result from coarse grid")
-    flag_affected_by_timeout = coarse_ferre_flags.flag(2**24, help_text="Affected by timeout")
+    # Every flag here is prefixed `flag_coarse_` so that no name collides with one on `result_flags`
+    # (or with a key in a params/abundance result dict). Without the prefix the later definition here
+    # shadowed the `result_flags` one of the same name, so `ASPCAP(**params_result_dict)` silently
+    # filed every params-stage flag into this coarse column and left `result_flags` at zero.
+    #
+    # Bit positions are deliberately identical to `FerreCoarse.ferre_flags`, because this column is
+    # written as a straight integer copy of it (see `coarse_ferre_flags=coarse.ferre_flags` in the
+    # ASPCAP pipeline). If you add a flag to one, add it at the same bit in the other.
+    flag_coarse_ferre_fail = coarse_ferre_flags.flag(2**0, help_text="FERRE failed on the coarse grid")
+    flag_coarse_missing_model_flux = coarse_ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE on the coarse grid")
+    flag_coarse_potential_ferre_timeout = coarse_ferre_flags.flag(2**2, help_text="Coarse grid potentially impacted by FERRE timeout")
+    flag_coarse_no_suitable_initial_guess = coarse_ferre_flags.flag(2**3, help_text="Coarse grid not executed because there's no suitable initial guess")
+    flag_coarse_spectrum_io_error = coarse_ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data on the coarse grid")
+    flag_coarse_teff_grid_edge_warn = coarse_ferre_flags.flag(2**5, help_text="Coarse Teff is within one step from the grid edge")
+    flag_coarse_teff_grid_edge_bad = coarse_ferre_flags.flag(2**6, help_text="Coarse Teff is within 1/8th of a step from the grid edge")
+    flag_coarse_logg_grid_edge_warn = coarse_ferre_flags.flag(2**7, help_text="Coarse logg is within one step from the grid edge")
+    flag_coarse_logg_grid_edge_bad = coarse_ferre_flags.flag(2**8, help_text="Coarse logg is within 1/8th of a step from the grid edge")
+    flag_coarse_v_micro_grid_edge_warn = coarse_ferre_flags.flag(2**9, help_text="Coarse v_micro is within one step from the grid edge")
+    flag_coarse_v_micro_grid_edge_bad = coarse_ferre_flags.flag(2**10, help_text="Coarse v_micro is within 1/8th of a step from the grid edge")
+    flag_coarse_v_sini_grid_edge_warn = coarse_ferre_flags.flag(2**11, help_text="Coarse v_sini is within one step from the highest grid edge")
+    flag_coarse_v_sini_grid_edge_bad = coarse_ferre_flags.flag(2**12, help_text="Coarse v_sini is within 1/8th of a step from the highest grid edge")
+    flag_coarse_m_h_atm_grid_edge_warn = coarse_ferre_flags.flag(2**13, help_text="Coarse [M/H] is within one step from the grid edge")
+    flag_coarse_m_h_atm_grid_edge_bad = coarse_ferre_flags.flag(2**14, help_text="Coarse [M/H] is within 1/8th of a step from the grid edge")
+    flag_coarse_alpha_m_grid_edge_warn = coarse_ferre_flags.flag(2**15, help_text="Coarse [alpha/M] is within one step from the grid edge")
+    flag_coarse_alpha_m_grid_edge_bad = coarse_ferre_flags.flag(2**16, help_text="Coarse [alpha/M] is within 1/8th of a step from the grid edge")
+    flag_coarse_c_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**17, help_text="Coarse [C/M] is within one step from the grid edge")
+    flag_coarse_c_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**18, help_text="Coarse [C/M] is within 1/8th of a step from the grid edge")
+    flag_coarse_n_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**19, help_text="Coarse [N/M] is within one step from the grid edge")
+    flag_coarse_n_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**20, help_text="Coarse [N/M] is within 1/8th of a step from the grid edge")
+    flag_coarse_caused_timeout = coarse_ferre_flags.flag(2**21, help_text="Caused timeout in the coarse stage")
+    flag_coarse_affected_by_timeout = coarse_ferre_flags.flag(2**22, help_text="Coarse result affected by a timeout")
+    flag_multiple_equally_good_coarse_results = coarse_ferre_flags.flag(2**23, help_text="Multiple equally good coarse results")
+    flag_no_good_coarse_result = coarse_ferre_flags.flag(2**24, help_text="No good result from coarse grid")
 
     coarse_rchi2 = FloatField(null=True, help_text=Glossary.coarse_rchi2)
     coarse_penalized_rchi2 = FloatField(null=True, help_text="Penalized reduced chi-squared for coarse grid")

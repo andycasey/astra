@@ -348,7 +348,7 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
     flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
     flag_caused_timeout = ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
-
+    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")
 
 
     '''
@@ -487,6 +487,7 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
     flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
     flag_caused_timeout = ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
+    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")
 
     '''
     class Meta:

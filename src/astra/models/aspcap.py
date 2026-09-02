@@ -575,6 +575,7 @@ class ASPCAP(PipelineOutputMixin):
     flag_caused_timeout = coarse_ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
     flag_multiple_equally_good_coarse_results = coarse_ferre_flags.flag(2**22, help_text="Multiple equally good coarse results")
     flag_no_good_coarse_result = coarse_ferre_flags.flag(2**23, "No good result from coarse grid")
+    flag_affected_by_timeout = coarse_ferre_flags.flag(2**24, help_text="Affected by timeout")
 
     coarse_rchi2 = FloatField(null=True, help_text=Glossary.coarse_rchi2)
     coarse_penalized_rchi2 = FloatField(null=True, help_text="Penalized reduced chi-squared for coarse grid")

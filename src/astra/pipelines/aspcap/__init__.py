@@ -601,6 +601,14 @@ def _aspcap_stage(
                 result["flag_caused_timeout"] = True
                 debugger(f"assigned {result['spectrum_pk']} as causing timeout")
 
+            # A spectrum whose row was never actually written by FERRE (excluded as a named
+            # culprit, or abandoned after resume attempts ran out) comes back with a NaN rchi2 --
+            # FERRE pads unreached rows with NaN and nothing overwrites them. Anyone who was
+            # merely delayed and successfully retried has a real, finite rchi2 by this point, so
+            # this only flags spectra whose result is actually incomplete/unreliable.
+            if not np.isfinite(result.get("rchi2", np.nan)):
+                result["flag_affected_by_timeout"] = True
+
             successes.append(result)
 
     debugger(f"doing thing {post_processed_futures}")

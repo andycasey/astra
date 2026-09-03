@@ -110,7 +110,7 @@ class _FakeProcess:
 
 def run_ferre(
     lines, stall_after, max_t_communicate, max_t_communicate_first_result,
-    max_t_elapsed=None, max_sigma_outlier=None, n_obj=10,
+    max_t_elapsed=None, max_sigma_outlier=None, n_obj=10, max_resume_attempts=0,
 ):
     """
     Drive ferre() against a faked subprocess; returns (result, elapsed_seconds).
@@ -123,6 +123,11 @@ def run_ferre(
     Keyed off the watchdogs' own log lines rather than whether the process object saw a kill():
     ferre() calls kill() unconditionally as cleanup once the reader loop ends, so a clean run and a
     watchdog kill are indistinguishable from the process object alone.
+
+    It also carries what the kill handed to the resume, which is what decides whether hung objects
+    are actually dropped from the retry or fed straight back into it:
+      * result.exclude_indices  -- passed to re_process_partial_ferre (None if it was never called)
+      * result.timeout_pks      -- spectrum pks reported as having caused the timeout
     """
     from time import time as _time
     from types import SimpleNamespace
@@ -130,17 +135,26 @@ def run_ferre(
 
     process = _FakeProcess(lines, stall_after)
     logged = []
+    pipe = RecordingPipe()
+    resume_calls = []
+
+    def _fake_re_process(existing_input_nml_path, pwd=None, exclude_indices=None):
+        resume_calls.append(list(exclude_indices or []))
+        return (None, None)
 
     with tempfile.TemporaryDirectory() as directory:
         with open(os.path.join(directory, "parameter.input"), "w") as fp:
             for i in range(n_obj):
                 fp.write(f"{i}_100{i}_200{i}_0_None   0.0 0.0 0.0 0.0 0.0 0.0 0.0 5000.0\n")
         input_nml_path = os.path.join(directory, "input.nml")
-        open(input_nml_path, "w").close()
+        # A real control file always names its PFILE, and the timeout-reporting path reads it to map
+        # object indices back to spectrum pks -- without it that path raises and reports nothing.
+        with open(input_nml_path, "w") as fp:
+            fp.write(" PFILE = 'parameter.input'\n")
 
         started = _time()
         with mock.patch.object(aspcap.subprocess, "Popen", return_value=process), \
-             mock.patch.object(aspcap, "re_process_partial_ferre", return_value=(None, None)), \
+             mock.patch.object(aspcap, "re_process_partial_ferre", side_effect=_fake_re_process), \
              mock.patch.object(aspcap, "merge_partial_ferre_outputs", return_value=None), \
              mock.patch.object(aspcap, "debugger",
                                lambda *a, **k: logged.append(" ".join(map(str, a)))):
@@ -149,14 +163,14 @@ def run_ferre(
                 directory,
                 n_obj=n_obj,
                 n_threads=8,
-                pipe=RecordingPipe(),
+                pipe=pipe,
                 communicate_on_start=True,
                 max_t_communicate=max_t_communicate,
                 max_t_communicate_first_result=max_t_communicate_first_result,
                 max_t_elapsed=max_t_elapsed,
                 max_sigma_outlier=max_sigma_outlier,
                 max_t_grid_load=None,
-                max_resume_attempts=0,
+                max_resume_attempts=max_resume_attempts,
             )
 
     assert not any("MONITOR DIED" in m for m in logged), "the monitor thread raised"
@@ -165,6 +179,9 @@ def run_ferre(
         # The sigma-outlier kill logs "hanging [<indices>]" -- distinct from the
         # "hanging on <path>" summary line emitted afterwards regardless of cause.
         outlier_fired=any(m.startswith("hanging [") for m in logged),
+        exclude_indices=resume_calls[0] if resume_calls else None,
+        timeout_pks=[m["timeout_on_spectrum_pk"] for m in pipe.messages
+                     if "timeout_on_spectrum_pk" in m],
     )
     return result, _time() - started
 
@@ -460,4 +477,89 @@ def test_unmatched_completions_do_not_disable_the_outlier_test():
     assert result.outlier_fired, (
         "NaN elapsed times must be ignored, not allowed to poison the distribution and silently "
         "switch the watchdog off"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Naming culprits on the no-communication kill
+#
+# The sigma test now only fires once *every* outstanding object is hung -- i.e. when no thread is
+# progressing -- so that one grid reload sheds up to NTHREADS bad objects instead of one. That
+# makes the two watchdogs race on the same clock: the last thread to wedge starts both the
+# communication budget and its own max_t_elapsed clock at the same moment, and the communication
+# check runs first in the loop body. So in exactly the many-bad-objects case, the communication
+# path wins.
+#
+# It used to kill blind. re_process_partial_ferre rebuilds the retry from the names already written
+# to the output files, which never include the hung objects -- so with an empty exclusion list they
+# went straight back into the resumed batch and hung again, burning every resume attempt.
+# ---------------------------------------------------------------------------
+
+def test_no_communication_kill_names_the_outstanding_objects():
+    """A wedge caught by the communication budget must hand its in-flight objects to the resume."""
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 13)]
+    lines += [f"          {i} {i-1}_100{i-1}_200{i-1}_0_None\n" for i in range(1, 11)]
+
+    result, _ = run_ferre(
+        lines, stall_after=len(lines),
+        # Tight enough to fire on the stall; the sigma test is off so this is the only watchdog.
+        max_t_communicate=1, max_t_communicate_first_result=1,
+        max_t_elapsed=None, max_sigma_outlier=None,
+        n_obj=12, max_resume_attempts=1,
+    )
+    assert result.communicate_fired, "expected the communication budget to fire on the stall"
+    assert result.exclude_indices is not None, "the kill should have prepared a resume"
+    # Objects 11 and 12 were dispatched and never completed; exclude_indices is 0-indexed.
+    assert sorted(result.exclude_indices) == [10, 11], (
+        f"expected the two outstanding objects to be excluded, got {result.exclude_indices} -- "
+        "an empty list feeds the hung objects straight back into the resumed batch"
+    )
+
+
+def test_no_communication_kill_before_any_result_still_names_them():
+    """
+    The early window is governed solely by max_t_communicate_first_result, since the sigma test is
+    suppressed until it has real completion data. A wedge there must still name culprits, otherwise
+    a batch that hangs on its first wave has nothing to exclude and cannot usefully resume at all.
+    """
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 4)]
+
+    result, _ = run_ferre(
+        lines, stall_after=len(lines),
+        max_t_communicate=1, max_t_communicate_first_result=1,
+        max_t_elapsed=1, max_sigma_outlier=None,
+        n_obj=6, max_resume_attempts=1,
+    )
+    assert result.communicate_fired, "expected the first-result budget to fire on the stall"
+    assert not result.outlier_fired, "the sigma test must stay suppressed before any completion"
+    assert sorted(result.exclude_indices or []) == [0, 1, 2], (
+        f"expected all three in-flight objects to be excluded, got {result.exclude_indices}"
+    )
+
+
+def test_no_communication_kill_reports_the_culprits_as_causing_the_timeout():
+    """
+    The excluded objects must also be reported back, so their rows carry flag_caused_timeout.
+
+    This one passes with or without the exclusion above -- the reporting path falls back to every
+    outstanding object when nothing was excluded. What it guards is the *other* branch, which the
+    exclusion now makes live: keys_to_flag re-derives 1-indexed keys from 0-indexed
+    exclude_indices, so an off-by-one there would silently report nothing at all.
+    """
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 13)]
+    lines += [f"          {i} {i-1}_100{i-1}_200{i-1}_0_None\n" for i in range(1, 11)]
+
+    result, _ = run_ferre(
+        lines, stall_after=len(lines),
+        max_t_communicate=1, max_t_communicate_first_result=1,
+        max_t_elapsed=None, max_sigma_outlier=None,
+        n_obj=12, max_resume_attempts=1,
+    )
+    # parameter.input names are "<index>_100<index>_200<index>_0_None", so spectrum_pk is 200<index>
+    # for the two objects (10, 11) left outstanding.
+    assert sorted(result.timeout_pks) == [20010, 20011], (
+        f"expected the outstanding objects reported as causing the timeout, got {result.timeout_pks}"
     )

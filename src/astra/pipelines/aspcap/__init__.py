@@ -725,6 +725,12 @@ def ferre(
                     budget = max_t_communicate_first_result if awaiting_first_result else max_t_communicate
                     if (budget is not None and (time() - t_last_communication) > budget):
                         debugger(f"hanging no communication (awaiting_first_result={awaiting_first_result}, budget={budget})")
+                        # Total silence means everything outstanding is stuck, so name them here --
+                        # otherwise the resume feeds the same hung objects straight back in.
+                        # Populate before ferre_hanging, which is what the reader loop breaks on.
+                        # FERRE's indices are 1-indexed; exclude_indices is 0-indexed.
+                        exclude_indices.extend([(k - 1) for k in t_awaiting_snapshot])
+                        debugger(f"no communication, excluding {len(t_awaiting_snapshot)} outstanding objects")
                         ferre_hanging.set()
                         try:
                             process.kill()
@@ -813,8 +819,12 @@ def ferre(
                             debugger(f"median / stddev {median:.2} {stddev:.2f} {t_awaiting_elapsed} {waiting_elapsed:.2f} {sigma_outlier} {is_hanging}")
 
                             # TODO: strace the process and check that it is waiting on FUTEX_PRIVATE_WAIT before killing it?
-                            # Need to kill and re-run the process.
-                            if is_hanging:
+                            # Need to kill and re-run the process when either out of objects
+                            # or resources taken up by hanging objects.
+                            n_out = len(t_awaiting_elapsed)
+                            n_reqiured = max(1, n_out)
+                            n_hanging = len(is_hanging)
+                            if n_hanging >= n_reqiured:
                                 exclude_indices.extend(is_hanging)
                                 debugger(f"hanging {is_hanging}")
                                 ferre_hanging.set()
@@ -881,6 +891,9 @@ def ferre(
                         # The object name is authoritative: its prefix is the index in parameter.input.
                         t = t_awaiting.pop(int(key.split("_")[0]) + 1) + time()
                     except:
+                        # A miss leaves an entry that ages forever and is now excluded on a wedge,
+                        # costing a healthy spectrum -- so make it visible rather than silent.
+                        debugger(f"could not clear t_awaiting for completed {key} in {cwd}")
                         t = np.nan
                     t_elapsed[key].append(t)
                 n_complete += 1

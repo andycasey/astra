@@ -659,8 +659,8 @@ def ferre(
     n_obj,
     n_threads,
     pipe,
-    max_sigma_outlier=10,  # 10,
-    max_t_elapsed=1000,  # 600,
+    max_sigma_outlier=15,  # recent tests found max to be 8.8, so some buffer
+    max_t_elapsed=3000,  # tail smaple in recent test found to reach 1800s
     max_t_grid_load=3600,  # 600, 1000 -- raised: loading the largest grids (~30GB) has been observed
                             # taking up to ~1600s, leaving little margin at 1000s against normal I/O variance.
     max_t_communicate=1000,  # 600,

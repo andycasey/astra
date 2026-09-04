@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from scipy.ndimage import binary_dilation
 from itertools import cycle
 from typing import Iterable, Optional
 from astra.pipelines.ferre.operator import post_execution_interpolation
@@ -343,7 +344,8 @@ def inflate_errors_at_bad_pixels(
 
     # Inflate errors around skylines,
     skyline_mask = (bitfield & 4096) > 0 # significant skyline
-    e_flux[skyline_mask] *= skyline_sigma_multiplier
+    near_sky = binary_dilation(skyline_mask, iterations=2)
+    e_flux[near_sky] *= skyline_sigma_multiplier
 
     # Sometimes FERRE will run forever.
     if spike_threshold_to_inflate_uncertainty > 0:
@@ -367,15 +369,16 @@ def inflate_errors_at_bad_pixels(
             #    n = np.sum(is_spike[pi])
             #    if n > 0:
             #        log.debug(f"  {n} pixels on spectrum index {pi}")
-        e_flux[is_spike] = bad_pixel_error_value
+        near_spike = binary_dilation(is_spike, iterations=2)
+        e_flux[near_spike] = bad_pixel_error_value
 
     # Set bad pixels to have no useful data.
     if bad_pixel_flux_value is not None or bad_pixel_error_value is not None:
         bad = (
             ~np.isfinite(flux)
             | ~np.isfinite(e_flux)
-            | (flux < 0)
-            | (e_flux < 0)
+            | (flux <= 0)
+            | (e_flux <= 0)
             | ((bitfield & 16639) > 0) # any bad value (level = 1)
         )
 
@@ -574,6 +577,90 @@ def get_new_path(existing_path, new_suffix):
         return ".".join(existing_path.split(".")[:-1]) + f".{new_suffix}"
 
 
+def read_written_names(path):
+    """
+    Return the names in a FERRE output file that have actually been written to.
+
+    FERRE pads its output files out to NOBJ rows, so a row existing is not proof that the object was
+    processed: rows for objects that were never reached carry the object name followed by NaN values.
+    Only the first value of each row is parsed, so this stays cheap on the very wide flux output files.
+    """
+    names = []
+    with open(path, "r") as fp:
+        for line in fp:
+            parts = line.split(None, 2)
+            if len(parts) < 2:
+                continue
+            try:
+                is_written = np.isfinite(float(parts[1]))
+            except ValueError:
+                is_written = False
+            if is_written:
+                names.append(parts[0])
+    return names
+
+
+def merge_partial_ferre_outputs(existing_input_nml_path, resumed_input_nml_path, pwd=None):
+    """
+    Merge the outputs of a resumed FERRE execution back into the original output files.
+
+    A resumed execution writes to its own output files, but post-processing only reads the output
+    files named by the original input file. Rows are matched by object name: any row produced by the
+    resumed execution replaces the (unwritten, NaN) row in the original.
+    """
+    if pwd is None:
+        pwd = os.path.dirname(existing_input_nml_path)
+
+    existing_kwds = utils.read_control_file(existing_input_nml_path)
+    resumed_kwds = utils.read_control_file(resumed_input_nml_path)
+
+    for key in ("OPFILE", "OFFILE", "SFFILE"):
+        try:
+            existing_path = os.path.join(pwd, existing_kwds[key])
+            resumed_path = os.path.join(pwd, resumed_kwds[key])
+        except KeyError:
+            continue
+
+        if not (os.path.exists(existing_path) and os.path.exists(resumed_path)):
+            continue
+
+        resumed_lines = {}
+        with open(resumed_path, "r") as fp:
+            for line in fp:
+                parts = line.split(None, 2)
+                if len(parts) < 2:
+                    continue
+                try:
+                    is_written = np.isfinite(float(parts[1]))
+                except ValueError:
+                    is_written = False
+                if is_written:
+                    resumed_lines[parts[0]] = line
+
+        if not resumed_lines:
+            continue
+
+        merged, n_replaced = ([], 0)
+        with open(existing_path, "r") as fp:
+            for line in fp:
+                name = line.split(None, 1)[0] if line.strip() else None
+                if name in resumed_lines:
+                    merged.append(resumed_lines.pop(name))
+                    n_replaced += 1
+                else:
+                    merged.append(line)
+
+        # Anything the resumed run produced that had no row in the original.
+        merged.extend(resumed_lines.values())
+
+        with open(existing_path, "w") as fp:
+            fp.write("".join(merged))
+
+        log.info(f"Merged {n_replaced} resumed rows into {existing_path}")
+
+    return None
+
+
 def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=None):
 
     if pwd is None:
@@ -589,9 +676,12 @@ def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=
 
     keys = ("PFILE", "OFFILE", "ERFILE", "OPFILE", "FFILE", "SFFILE")
     paths = {}
+    nobj_index = None
     for i, line in enumerate(lines):
         key = line.split("=")[0].strip()
-        if key in keys:
+        if key == "NOBJ":
+            nobj_index = i
+        elif key in keys:
             existing_relative_path = line.split("=")[1].strip("' \n")
             # All new relative paths must be within this directory
             # For example, if the flux arrays were stored in the parent directory, we must
@@ -599,11 +689,8 @@ def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=
             # trying to write to the same parent file.
             # TODO: do that
             new_relative_path = get_new_path(existing_relative_path, new_suffix)
-            lines[i] = line[:line.index("=")] + f"= '{new_relative_path}'"
+            lines[i] = line[:line.index("=")] + f"= '{new_relative_path}'\n"
             paths[key] = (existing_relative_path, new_relative_path)
-
-    with open(new_input_nml_path, "w") as fp:
-        fp.write("".join(lines))
 
     # TODO: copy input files to this directory because otherwise we will have partial flux files
     #       in the parent directory and it gets impossible to track
@@ -615,8 +702,7 @@ def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=
 
     counts = []
     for key in output_path_keys:
-        names = np.unique(np.loadtxt(os.path.join(pwd, paths[key][0]), usecols=(0, ), dtype=str))
-        counts.extend(names)
+        counts.extend(set(read_written_names(os.path.join(pwd, paths[key][0]))))
 
     completed_names = [k for k, v in Counter(counts).items() if v == len(output_path_keys)]
     input_names = np.loadtxt(os.path.join(pwd, paths["PFILE"][0]), usecols=(0, ), dtype=str)
@@ -625,9 +711,18 @@ def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=
     if exclude_indices is not None:
         ignore_names.extend([input_names[int(idx)] for idx in exclude_indices])
 
-    mask = [(name not in ignore_names) for name in input_names]
+    ignore_names_set = set(ignore_names)
+    mask = [(name not in ignore_names_set) for name in input_names]
     if not any(mask):
         return (None, None)
+
+    # NOBJ must match the number of rows we are about to write, otherwise FERRE reads past the end
+    # of the new input files.
+    if nobj_index is not None:
+        lines[nobj_index] = f" NOBJ = {sum(mask)}\n"
+
+    with open(new_input_nml_path, "w") as fp:
+        fp.write("".join(lines))
 
     # Create new input files that ignore specific names.
     for key in ("PFILE", "ERFILE", "FFILE"):
@@ -646,7 +741,8 @@ def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=
         with open(os.path.join(pwd, existing_path), "r") as f:
             lines = f.readlines()
 
-        lines = [line for line in lines if line.split()[0].strip() in completed_names]
+        completed_names_set = set(completed_names)
+        lines = [line for line in lines if line.split()[0].strip() in completed_names_set]
         with open(os.path.join(pwd, existing_path) + ".cleaned", "w") as fp:
             fp.write("".join(lines))
 

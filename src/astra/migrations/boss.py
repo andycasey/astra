@@ -461,29 +461,35 @@ def migrate_specfull_metadata_from_image_headers(
 
     specFulls, futures = ({}, [])
     all_missing_counts = {}
-    with queue.subtask("Scraping specFull headers", total=None) as scrape_step:
-        for chunk in chunked(q, batch_size):
-            futures.append(executor.submit(_migrate_specfull_metadata, chunk, fields))
-            for spec in chunk:
-                specFulls[spec.pk] = spec
-            scrape_step.update(advance=len(chunk))
-        scrape_step.update(total=len(specFulls), completed=len(specFulls))
+    try:
+        with queue.subtask("Scraping specFull headers", total=None) as scrape_step:
+            for chunk in chunked(q, batch_size):
+                futures.append(executor.submit(_migrate_specfull_metadata, chunk, fields))
+                for spec in chunk:
+                    specFulls[spec.pk] = spec
+                scrape_step.update(advance=len(chunk))
+            scrape_step.update(total=len(specFulls), completed=len(specFulls))
 
-    with queue.subtask("Parsing specFull metadata", total=len(futures)) as parse_step:
-        for future in concurrent.futures.as_completed(futures):
-            metadata, missing_counts = future.result()
-            for name, missing_count in missing_counts.items():
-                all_missing_counts.setdefault(name, 0)
-                all_missing_counts[name] += missing_count
+        with queue.subtask("Parsing specFull metadata", total=len(futures)) as parse_step:
+            for future in concurrent.futures.as_completed(futures):
+                metadata, missing_counts = future.result()
+                for name, missing_count in missing_counts.items():
+                    all_missing_counts.setdefault(name, 0)
+                    all_missing_counts[name] += missing_count
 
-            for pk, meta in metadata.items():
-                for key, value in meta.items():
-                    setattr(specFulls[pk], key, value)
-                for key, value in defaults.items():
-                    if key not in meta:
+                for pk, meta in metadata.items():
+                    for key, value in meta.items():
                         setattr(specFulls[pk], key, value)
+                    for key, value in defaults.items():
+                        if key not in meta:
+                            setattr(specFulls[pk], key, value)
 
-            parse_step.update(advance=1)
+                parse_step.update(advance=1)
+    finally:
+        # Always tear down the worker pool; a leaked ProcessPoolExecutor can
+        # deadlock interpreter shutdown (especially under the 'fork' start
+        # method), which hangs the migration scheduler's process.join().
+        executor.shutdown(wait=True)
 
     with queue.subtask("Ingesting specFull metadata", total=len(specFulls)) as ingest_step:
         for chunk in chunked(specFulls.values(), batch_size):

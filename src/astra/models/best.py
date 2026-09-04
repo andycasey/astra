@@ -38,6 +38,7 @@ class MWMBest(PipelineOutputMixin):
     gri_gaia_transform_flags = BitField(default=0, help_text="Flags for provenance of ugriz photometry")
     zwarning_flags = BitField(default=0, help_text="BOSS DRP warning flags") 
     spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
+    star_flags = BitField(default=0, help_text=Glossary.star_flags)
 
     #> Observing Span
     min_mjd = IntegerField(null=True, help_text="Minimum MJD of visits")

@@ -248,7 +248,7 @@ SPECTRUM_FIELDS = {
         ApogeeCoaddedSpectrumInApStar.snr,
         ApogeeCoaddedSpectrumInApStar.mean_fiber,
         ApogeeCoaddedSpectrumInApStar.std_fiber,
-        ApogeeCoaddedSpectrumInApStar.spectrum_flags,
+        ApogeeCoaddedSpectrumInApStar.star_flags,
 
         ApogeeCoaddedSpectrumInApStar.v_rad,
         ApogeeCoaddedSpectrumInApStar.e_v_rad,

@@ -30,14 +30,14 @@ dependencies = [
   "scikit-learn",
   "joblib",
   "pandas",
-  "apache-airflow",
+  "apache-airflow<3.0",
   "decorator",
   "h5py",
   "thread",
   "typer",
   "dustmaps",
   "fitsio",
-  "torch",
+  "torch==2.12.0", # cu126 build; see [tool.uv.sources] below
   "astronn",
   "sdss-semaphore",
 ]
@@ -75,3 +75,15 @@ dev = [
   "pre-commit",
   "black",
 ]
+
+# The default PyPI torch wheel is built against CUDA 13, which dropped Volta
+# (sm_70). The GPU nodes here are V100s, so those wheels fail at the first
+# kernel launch with `cudaErrorNoKernelImageForDevice`. The cu126 wheels are the
+# most recent ones still built for sm_70.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }

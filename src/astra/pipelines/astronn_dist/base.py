@@ -122,12 +122,12 @@ def _inference(model, batch):
                 t_elapsed=mean_t_elapsed,
                 k_mag=all_meta[i][0],
                 ebv = all_meta[i][1],
-                a_k_mag=all_meta[i][2],
+                A_k_mag=all_meta[i][2],
                 L_fakemag=float(np.atleast_1d(fakemag)[i]),
                 #L_fakemag=float(fakemag_err['total']),
-                L_fakemag_err=float(np.atleast_1d(fakemag_err)[i]),
+                e_L_fakemag=float(np.atleast_1d(fakemag_err)[i]),
                 dist=dist,
-                dist_err=dist_err,
+                e_dist=dist_err,
             )
             output.apply_flags(all_meta[i], missing_photometry=missing_photometrys[i], missing_extinction=missing_extinctions[i])
             #print("+"*6, "(_inference) output:", output.__data__)

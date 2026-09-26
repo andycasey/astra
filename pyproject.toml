@@ -30,7 +30,7 @@ dependencies = [
   "scikit-learn",
   "joblib",
   "pandas",
-  "apache-airflow<3.0",
+  "apache-airflow>=2.9,<3.0", # lower bound stops the resolver backtracking to unbuildable 1.x
   "decorator",
   "h5py",
   "thread",

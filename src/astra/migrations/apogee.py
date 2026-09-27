@@ -322,9 +322,26 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
                 )
                 upsert_step.update(advance=len(chunk))
 
+        # A visit whose RV changed (new starver, or re-run in place) has a newer `modified`, and the DRP
+        # rewrites the apStar with it re-shifted. Nothing about this row changes, so bump `modified` so
+        # pipelines that take ApogeeVisitSpectrumInApStar will re-run.
+        with database.atomic():
+            n_apogee_visit_in_apstar_modified = (
+                ApogeeVisitSpectrumInApStar
+                .update(modified=datetime.now())
+                .from_(ApogeeVisitSpectrum)
+                .where(
+                    (ApogeeVisitSpectrumInApStar.drp_spectrum_pk == ApogeeVisitSpectrum.spectrum_pk)
+                &   (ApogeeVisitSpectrumInApStar.apred == apred)
+                &   (ApogeeVisitSpectrum.modified > ApogeeVisitSpectrumInApStar.modified)
+                )
+                .execute()
+            )
+        log.info(f"Bumped modified on {n_apogee_visit_in_apstar_modified} ApogeeVisitSpectrumInApStar rows due to RV changes.")
+
     queue.put(Ellipsis)
 
-    return (n_apogee_visit_in_apstar_inserted, failed_to_match_to_drp_spectrum_pk)
+    return (n_apogee_visit_in_apstar_inserted, failed_to_match_to_drp_spectrum_pk, n_apogee_visit_in_apstar_modified)
 
 
 def _get_apstar_metadata(

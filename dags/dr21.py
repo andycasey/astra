@@ -111,7 +111,7 @@ with DAG(
                 # To be safe while testing, let's do 4 nodes with 40,000 spectra (should be approx 12 hrs wall time)
                 #bash_command='astra srun aspcap --limit 10000 --nodes 8 --time="48:00:00"'
                 #bash_command='astra srun aspcap --limit 125000 --nodes 10 --time="48:00:00"'
-                bash_command=f'astra srun aspcap --limit {ASPCAP_LIMIT} --nodes {ASPCAP_NODES} --time="60:00:00" --qos=sdss-np --partition=sdss-np --account=sdss-np',
+                bash_command=f'LD_PRELOAD=/usr/lib64/libtcmalloc_minimal.so.4 astra srun aspcap --limit {ASPCAP_LIMIT} --nodes {ASPCAP_NODES} --time="60:00:00" --qos=sdss-np --partition=sdss-np --account=sdss-np',
                 pool=SDSS_NP_POOL,
                 pool_slots=ASPCAP_NODES,
                 # Smaller sdss-np tasks can otherwise keep filling freed slots and starve aspcap.

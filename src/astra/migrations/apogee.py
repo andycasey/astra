@@ -792,9 +792,14 @@ def migrate_apogee_visits(
     from astra.migrations.sdss5db.catalogdb import CatalogdbModel
 
     _where_modified = (
-            (ApogeeVisitSpectrum.rv_visit_pk.is_null() & EXCLUDED.rv_visit_pk.is_null(False))   # New RV measurement; none before.
-        |   (ApogeeVisitSpectrum.rv_visit_pk.is_null(False) & EXCLUDED.rv_visit_pk.is_null())   # Old RV measurement was bad.
-        |   (EXCLUDED.rv_visit_pk > ApogeeVisitSpectrum.rv_visit_pk)                            # Updated RV measurement.
+            (ApogeeVisitSpectrum.rv_visit_pk.is_null() & EXCLUDED.rv_visit_pk.is_null(False))            # New RV measurement; none before.
+        |   (ApogeeVisitSpectrum.rv_visit_pk.is_null(False) & EXCLUDED.rv_visit_pk.is_null())            # Old RV measurement was bad.
+        |   (EXCLUDED.rv_visit_pk > ApogeeVisitSpectrum.rv_visit_pk)                                     # Updated RV measurement.
+            # RV re-run by the DRP in place (same rv_visit pk and starver, newer `created`)
+        |   (
+                ApogeeVisitSpectrum.modified
+            <   SQL('(SELECT "created" FROM "apogee_drp"."rv_visit" WHERE "pk" = EXCLUDED."rv_visit_pk")')
+            )
     )
     if where_modified is not None:
         where_modified |= _where_modified
@@ -810,10 +815,12 @@ def migrate_apogee_visits(
             table_name = "sdss_id_stacked"
     queue = queue or ProgressContext()
 
-    max_rv_visit_pk, max_visit_pk = (0, 0)
+    max_rv_visit_pk, max_visit_pk, max_modified = (0, 0, datetime.min)
     if incremental:
         max_rv_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.rv_visit_pk)).scalar() or 0
         max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.visit_pk)).scalar() or 0
+        # RVs re-run in place keep their pk, so select them by `created` being newer than our last update.
+        max_modified = ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.modified)).scalar() or datetime.min
 
     if max_mjd is None:
         max_mjd = 1_000_000
@@ -829,7 +836,7 @@ def migrate_apogee_visits(
         )
         .where(
             (RvVisit.apred_vers == apred)
-        &   (RvVisit.pk > max_rv_visit_pk)
+        &   ((RvVisit.pk > max_rv_visit_pk) | (RvVisit.created > max_modified))
         &   (RvVisit.mjd <= max_mjd)
         )
         .group_by(RvVisit.visit_pk)
@@ -859,6 +866,7 @@ def migrate_apogee_visits(
             RvVisit.visitflag,
             RvVisit.rv_ccpfwhm,
             RvVisit.rv_autofwhm,
+            RvVisit.created,
         )
         .join(
             ssq,
@@ -942,7 +950,12 @@ def migrate_apogee_visits(
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .where(
             (Visit.apred == apred)
-        &   (Visit.pk > max_visit_pk)
+            # New visits, or existing visits with a new RV (new starver) or an RV re-run in place.
+        &   (
+                (Visit.pk > max_visit_pk)
+            |   (sq.c.pk > max_rv_visit_pk)
+            |   (sq.c.created > max_modified)
+            )
         &   (Visit.mjd <= max_mjd)
         &   (SDSS_ID_Flat.rank == 1)
         &   (

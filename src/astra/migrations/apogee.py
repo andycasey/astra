@@ -570,13 +570,14 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
 
     queue = queue or ProgressContext()
 
-    max_star_pk = 0
+    max_star_pk, max_modified = (0, datetime.min)
     if incremental:
         max_star_pk = (
             ApogeeCoaddedSpectrumInApStar
             .select(fn.MAX(ApogeeCoaddedSpectrumInApStar.star_pk))
             .scalar() or 0
         )
+        max_modified = ApogeeCoaddedSpectrumInApStar.select(fn.MAX(ApogeeCoaddedSpectrumInApStar.modified)).scalar() or datetime.min
 
     restrict_clause = (
         Tuple(Star.obj, Star.telescope).in_(restrict_to_stars)
@@ -588,7 +589,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
     # so we have to sub-query to get the most recent co-add.
     sq_where = (
         (Star.apred_vers == apred)
-    &   (Star.pk > max_star_pk)
+    &   ((Star.pk > max_star_pk) | (Star.created > max_modified))
     )
     if restrict_clause is not None:
         # Safe to narrow here as well as in the outer query: restricting which
@@ -688,7 +689,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .where(
             (Star.apred_vers == apred)
-        &   (Star.pk > max_star_pk)
+        &   ((Star.pk > max_star_pk) | (Star.created > max_modified))
         &   (SDSS_ID_Flat.rank == 1)
         &   (outer_clause if outer_clause is not None else SQL("TRUE"))
         )

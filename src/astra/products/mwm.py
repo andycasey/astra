@@ -41,7 +41,8 @@ def create_mwmVisit_and_mwmStar_products(
     apreds: Optional[Iterable[str]] = ("1.6", "dr17"),
     run2ds: Optional[Iterable[str]] = ("v6_2_1", ),
     max_processes: Optional[int] = 4,
-    overwrite: bool = False,
+    # Only sources that are missing or stale are selected, and a stale product has to be rewritten.
+    overwrite: bool = True,
     **kwargs
 ) -> Iterable[MWMSpectrumProductStatus]:
 

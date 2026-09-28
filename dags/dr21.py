@@ -18,12 +18,12 @@ SDSS_NP_POOL = "sdss_np"
 # 8/2 split: ASPCAP gets 8 nodes (~12,500 spectra per node, ~47 h per batch); mwm and
 # astraStar take turns on the other 2. Every other task in a run must finish within one
 # ASPCAP batch, or the next run isn't created in time and ASPCAP sits idle.
-MWM_NODES = 2
-ASPCAP_NODES = 8
-ASTRA_STAR_NODES = 2
+MWM_NODES = 1
+ASPCAP_NODES = 9
+ASTRA_STAR_NODES = 1
 ASTRONN_DIST_NODES = 1
 ASPCAP_LIMIT = 12_500 * ASPCAP_NODES
-MWM_LIMIT = 1_000_000
+MWM_LIMIT = 500_000
 ASTRONN_STAR_LIMIT = 700_000
 
 def skippy(*args, **kwargs):

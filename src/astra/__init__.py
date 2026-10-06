@@ -208,6 +208,30 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
 
 
 
+def _pipeline_result_is_newer(output_model, pipeline, current_version):
+    """
+    An expression that is true when the source has a result from `pipeline` that is newer than
+    the `output_model` row (e.g. an astraStar product status).
+
+    A pipeline re-run updates its result in place without changing the source, so this is how a
+    product built from that result knows it is stale.
+    """
+    from peewee import fn, SQL
+    from astra.models.source import Source
+    from astra.products.pipeline_registry import PIPELINES
+    from astra.products.utils import resolve_model
+
+    spec = PIPELINES[pipeline]
+    pipeline_model = resolve_model(spec.model)
+    where = (
+        (pipeline_model.source_pk == Source.pk)
+    &   (pipeline_model.v_astra_major_minor == current_version)
+    &   (pipeline_model.modified > output_model.modified)
+    )
+    if spec.where is not None:
+        where &= spec.where(pipeline_model)
+    return fn.EXISTS(pipeline_model.select(SQL("1")).where(where))
+
 
 def generate_queries_for_task(
     task,
@@ -268,6 +292,10 @@ def generate_queries_for_task(
             where = output_model.source_pk.is_null()
             if not missing_only:
                 where |= (input_model.modified > output_model.modified)
+                # Products built from a pipeline's results (e.g. astraStar) are also stale when
+                # that pipeline has a newer result, which does not change the source.
+                if pipeline is not None and hasattr(output_model, "pipeline"):
+                    where |= _pipeline_result_is_newer(output_model, pipeline, current_version)
 
             if sdss_ids is not None:
                 where &= (Source.sdss_id.in_(sdss_ids))

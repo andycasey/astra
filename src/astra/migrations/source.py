@@ -633,6 +633,56 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
     return n_linked
 
 
+def update_source_modified_from_spectra(queue=None):
+    """
+    Bump `Source.modified` for sources with a spectrum that is newer than the source.
+
+    This covers spectra updated in place during migration (e.g. APOGEE visits whose RV was
+    re-run, or coadds with a new `starver`) and new spectra linked to an existing source.
+    Tasks that take `Source` as input (e.g. mwmVisit/mwmStar) are re-queued when
+    `Source.modified` is newer than their output.
+
+    Only spectrum models filled by the migration are checked. Models written by product
+    creation (e.g. `ApogeeCombinedSpectrum`, `BossRestFrameVisitSpectrum`) must not be added:
+    creating an mwmStar would then bump the source and re-queue the same mwmStar forever.
+    """
+    from datetime import datetime
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
+    from astra.models.boss import BossVisitSpectrum
+
+    queue = queue or ProgressContext()
+
+    models = (
+        ApogeeVisitSpectrum,
+        ApogeeVisitSpectrumInApStar,
+        ApogeeCoaddedSpectrumInApStar,
+        BossVisitSpectrum,
+    )
+    now = datetime.now()
+    n_updated = 0
+    with queue.subtask("Bumping Source.modified from updated spectra", total=len(models)) as step:
+        with database.atomic():
+            for model in models:
+                # Once a source is bumped to `now`, spectra in later models are no longer newer
+                # than it, so each source is counted once.
+                n_updated += (
+                    Source
+                    .update(modified=now)
+                    .from_(model)
+                    .where(
+                        (model.source_pk == Source.pk)
+                    &   (model.modified > Source.modified)
+                    )
+                    .execute()
+                )
+                step.update(advance=1)
+
+    log.info(f"Bumped Source.modified on {n_updated} sources with updated or newly linked spectra")
+    return n_updated
+
+
 def create_sources_and_link_spectra(batch_size: int = 1000, queue=None):
     """
     Unified function to create sources and link all spectrum types.
@@ -642,6 +692,7 @@ def create_sources_and_link_spectra(batch_size: int = 1000, queue=None):
     2. Creates Source entries for any spectra with catalogids but no source
     3. Links BossVisitSpectrum to sources
     4. Links ApogeeVisitSpectrum to sources
+    5. Bumps Source.modified for sources with updated or newly linked spectra
     """
     queue = queue or ProgressContext()
 
@@ -656,6 +707,10 @@ def create_sources_and_link_spectra(batch_size: int = 1000, queue=None):
 
     # Step 3: Link APOGEE spectra
     n_apogee_linked = link_apogee_spectra_to_sources(batch_size=batch_size, queue=queue)
+
+    # Step 4: Re-queue Source-level tasks for sources whose spectra were updated or newly linked.
+    # This has to come after linking: new spectra only get a source_pk in the steps above.
+    n_sources_modified = update_source_modified_from_spectra(queue=queue)
 
     #log.info(f"Filled {n_dr17_filled} DR17 catalogids, created {n_new_sources} new sources, linked {n_boss_linked} BOSS and {n_apogee_linked} APOGEE spectra")
 

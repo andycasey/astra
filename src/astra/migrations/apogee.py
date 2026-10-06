@@ -322,9 +322,26 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
                 )
                 upsert_step.update(advance=len(chunk))
 
+        # A visit whose RV changed (new starver, or re-run in place) has a newer `modified`, and the DRP
+        # rewrites the apStar with it re-shifted. Nothing about this row changes, so bump `modified` so
+        # pipelines that take ApogeeVisitSpectrumInApStar will re-run.
+        with database.atomic():
+            n_apogee_visit_in_apstar_modified = (
+                ApogeeVisitSpectrumInApStar
+                .update(modified=datetime.now())
+                .from_(ApogeeVisitSpectrum)
+                .where(
+                    (ApogeeVisitSpectrumInApStar.drp_spectrum_pk == ApogeeVisitSpectrum.spectrum_pk)
+                &   (ApogeeVisitSpectrumInApStar.apred == apred)
+                &   (ApogeeVisitSpectrum.modified > ApogeeVisitSpectrumInApStar.modified)
+                )
+                .execute()
+            )
+        log.info(f"Bumped modified on {n_apogee_visit_in_apstar_modified} ApogeeVisitSpectrumInApStar rows due to RV changes.")
+
     queue.put(Ellipsis)
 
-    return (n_apogee_visit_in_apstar_inserted, failed_to_match_to_drp_spectrum_pk)
+    return (n_apogee_visit_in_apstar_inserted, failed_to_match_to_drp_spectrum_pk, n_apogee_visit_in_apstar_modified)
 
 
 def _get_apstar_metadata(
@@ -553,13 +570,14 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
 
     queue = queue or ProgressContext()
 
-    max_star_pk = 0
+    max_star_pk, max_modified = (0, datetime.min)
     if incremental:
         max_star_pk = (
             ApogeeCoaddedSpectrumInApStar
             .select(fn.MAX(ApogeeCoaddedSpectrumInApStar.star_pk))
             .scalar() or 0
         )
+        max_modified = ApogeeCoaddedSpectrumInApStar.select(fn.MAX(ApogeeCoaddedSpectrumInApStar.modified)).scalar() or datetime.min
 
     restrict_clause = (
         Tuple(Star.obj, Star.telescope).in_(restrict_to_stars)
@@ -571,7 +589,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
     # so we have to sub-query to get the most recent co-add.
     sq_where = (
         (Star.apred_vers == apred)
-    &   (Star.pk > max_star_pk)
+    &   ((Star.pk > max_star_pk) | (Star.created > max_modified))
     )
     if restrict_clause is not None:
         # Safe to narrow here as well as in the outer query: restricting which
@@ -671,7 +689,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .where(
             (Star.apred_vers == apred)
-        &   (Star.pk > max_star_pk)
+        &   ((Star.pk > max_star_pk) | (Star.created > max_modified))
         &   (SDSS_ID_Flat.rank == 1)
         &   (outer_clause if outer_clause is not None else SQL("TRUE"))
         )
@@ -792,9 +810,14 @@ def migrate_apogee_visits(
     from astra.migrations.sdss5db.catalogdb import CatalogdbModel
 
     _where_modified = (
-            (ApogeeVisitSpectrum.rv_visit_pk.is_null() & EXCLUDED.rv_visit_pk.is_null(False))   # New RV measurement; none before.
-        |   (ApogeeVisitSpectrum.rv_visit_pk.is_null(False) & EXCLUDED.rv_visit_pk.is_null())   # Old RV measurement was bad.
-        |   (EXCLUDED.rv_visit_pk > ApogeeVisitSpectrum.rv_visit_pk)                            # Updated RV measurement.
+            (ApogeeVisitSpectrum.rv_visit_pk.is_null() & EXCLUDED.rv_visit_pk.is_null(False))            # New RV measurement; none before.
+        |   (ApogeeVisitSpectrum.rv_visit_pk.is_null(False) & EXCLUDED.rv_visit_pk.is_null())            # Old RV measurement was bad.
+        |   (EXCLUDED.rv_visit_pk > ApogeeVisitSpectrum.rv_visit_pk)                                     # Updated RV measurement.
+            # RV re-run by the DRP in place (same rv_visit pk and starver, newer `created`)
+        |   (
+                ApogeeVisitSpectrum.modified
+            <   SQL('(SELECT "created" FROM "apogee_drp"."rv_visit" WHERE "pk" = EXCLUDED."rv_visit_pk")')
+            )
     )
     if where_modified is not None:
         where_modified |= _where_modified
@@ -810,10 +833,12 @@ def migrate_apogee_visits(
             table_name = "sdss_id_stacked"
     queue = queue or ProgressContext()
 
-    max_rv_visit_pk, max_visit_pk = (0, 0)
+    max_rv_visit_pk, max_visit_pk, max_modified = (0, 0, datetime.min)
     if incremental:
         max_rv_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.rv_visit_pk)).scalar() or 0
         max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.visit_pk)).scalar() or 0
+        # RVs re-run in place keep their pk, so select them by `created` being newer than our last update.
+        max_modified = ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.modified)).scalar() or datetime.min
 
     if max_mjd is None:
         max_mjd = 1_000_000
@@ -829,7 +854,7 @@ def migrate_apogee_visits(
         )
         .where(
             (RvVisit.apred_vers == apred)
-        &   (RvVisit.pk > max_rv_visit_pk)
+        &   ((RvVisit.pk > max_rv_visit_pk) | (RvVisit.created > max_modified))
         &   (RvVisit.mjd <= max_mjd)
         )
         .group_by(RvVisit.visit_pk)
@@ -859,6 +884,7 @@ def migrate_apogee_visits(
             RvVisit.visitflag,
             RvVisit.rv_ccpfwhm,
             RvVisit.rv_autofwhm,
+            RvVisit.created,
         )
         .join(
             ssq,
@@ -942,7 +968,12 @@ def migrate_apogee_visits(
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .where(
             (Visit.apred == apred)
-        &   (Visit.pk > max_visit_pk)
+            # New visits, or existing visits with a new RV (new starver) or an RV re-run in place.
+        &   (
+                (Visit.pk > max_visit_pk)
+            |   (sq.c.pk > max_rv_visit_pk)
+            |   (sq.c.created > max_modified)
+            )
         &   (Visit.mjd <= max_mjd)
         &   (SDSS_ID_Flat.rank == 1)
         &   (

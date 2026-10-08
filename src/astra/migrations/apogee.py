@@ -120,15 +120,29 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
     try:
+        InApStar = ApogeeVisitSpectrumInApStar
+        Coadd = ApogeeCoaddedSpectrumInApStar
         q = (
-            ApogeeCoaddedSpectrumInApStar
+            Coadd
             .select()
             .where(
-                (ApogeeCoaddedSpectrumInApStar.apred == apred)
+                (Coadd.apred == apred)
+                # Only apStars that are new or changed since their visit rows were last written.
+            &   ~fn.EXISTS(
+                    InApStar.select(SQL("1")).where(
+                        (InApStar.release == Coadd.release)
+                    &   (InApStar.apred == Coadd.apred)
+                    &   (InApStar.apstar == Coadd.apstar)
+                    &   (InApStar.obj == Coadd.obj)
+                    &   (InApStar.telescope == Coadd.telescope)
+                    &   (InApStar.modified >= Coadd.modified)
+                    )
+                )
             )
             .limit(limit)
             .iterator()
         )
+
 
         apStar_spectra, futures = ({}, [])
         total = 0

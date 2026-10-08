@@ -450,6 +450,7 @@ def srun(
     qos: Annotated[str, typer.Option(help="Slurm QoS")] = None,
     gres: Annotated[str, typer.Option(help="Slurm generic resources")] = None,
     mem: Annotated[str, typer.Option(help="Memory per node")] = 0,
+    cpus: Annotated[int, typer.Option(help="CPUs per task (useful with `--no-exclusive`).", min=1)] = None,
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
     exclusive: Annotated[bool, typer.Option(help="Use exclusive node allocation.")] = True,
     only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
@@ -602,6 +603,8 @@ def srun(
                     executable.append(f"--qos={qos}")
                 if mem is not None:
                     executable.append(f"--mem={mem}")
+                if cpus is not None:
+                    executable.append(f"--cpus-per-task={cpus}")
                 if gres is not None:
                     executable.append(f"--gres={gres}")
 

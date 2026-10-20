@@ -19,12 +19,16 @@ SDSS_NP_POOL = "sdss_np"
 # astraStar take turns on the other 2. Every other task in a run must finish within one
 # ASPCAP batch, or the next run isn't created in time and ASPCAP sits idle.
 MWM_NODES = 1
-ASPCAP_NODES = 9
+ASPCAP_NODES = 13
 ASTRA_STAR_NODES = 1
 ASTRONN_DIST_NODES = 1
 ASPCAP_LIMIT = 12_500 * ASPCAP_NODES
 MWM_LIMIT = 500_000
 ASTRONN_STAR_LIMIT = 700_000
+# When a pipeline has nothing to process, `astra srun` exits 99, which BashOperator marks as
+# skipped; its downstream `astra create ... --overwrite` is then skipped too, so unchanged
+# products are not rewritten.
+SKIP_IF_EMPTY = "--empty-exit-code 99"
 
 def skippy(*args, **kwargs):
     raise AirflowSkipException()
@@ -82,7 +86,8 @@ with DAG(
         apogeenet_star = (
             BashOperator(
                 task_id="star",
-                bash_command='astra srun apogeenet apogee.ApogeeCoaddedSpectrumInApStar --mem=0 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+                # bash_command='astra srun apogeenet apogee.ApogeeCoaddedSpectrumInApStar --no-exclusive --mem=32G --cpus=8 --gres="gpu:v100" --account="notchpeak-gpu" --time="24:00:00"'
+                bash_command=f'astra srun apogeenet apogee.ApogeeCoaddedSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=32G --cpus=8 --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="24:00:00"'
             )
         )
         apogeenet_star >> (
@@ -94,7 +99,8 @@ with DAG(
         (
             BashOperator(
                 task_id="visit",
-                bash_command='astra srun apogeenet apogee.ApogeeVisitSpectrumInApStar --mem=0 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+                # bash_command='astra srun apogeenet apogee.ApogeeVisitSpectrumInApStar  --no-exclusive --mem=64G --cpus=8 --gres="gpu:v100" --account="notchpeak-gpu" --time="24:00:00"'
+                bash_command=f'astra srun apogeenet apogee.ApogeeVisitSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=64G --cpus=8 --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="24:00:00"'
             )
         ) >> (
             BashOperator(
@@ -111,11 +117,14 @@ with DAG(
                 # To be safe while testing, let's do 4 nodes with 40,000 spectra (should be approx 12 hrs wall time)
                 #bash_command='astra srun aspcap --limit 10000 --nodes 8 --time="48:00:00"'
                 #bash_command='astra srun aspcap --limit 125000 --nodes 10 --time="48:00:00"'
-                bash_command=f'astra srun aspcap --limit {ASPCAP_LIMIT} --nodes {ASPCAP_NODES} --time="60:00:00" --qos=sdss-np --partition=sdss-np --account=sdss-np',
+                bash_command=f'astra srun aspcap --limit {ASPCAP_LIMIT} --nodes {ASPCAP_NODES} {SKIP_IF_EMPTY} --time="60:00:00" --qos=sdss-np --partition=sdss-np --account=sdss-np',
                 pool=SDSS_NP_POOL,
                 pool_slots=ASPCAP_NODES,
                 # Smaller sdss-np tasks can otherwise keep filling freed slots and starve aspcap.
                 priority_weight=10,
+                # Upstream ApogeeNet.star is skipped when it has nothing new; run anyway (still
+                # blocked if it actually fails).
+                trigger_rule="none_failed",
             )
         ) >> (
             BashOperator(
@@ -149,7 +158,8 @@ with DAG(
     with TaskGroup(group_id="AstroNN") as astronn:
         astronn_star = BashOperator(
             task_id="star",
-            bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeCoaddedSpectrumInApStar --mem=0 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+            # bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeCoaddedSpectrumInApStar --no-exclusive --mem=160G --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+            bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeCoaddedSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=160G --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="48:00:00"'
         )
         astronn_star >> (
             BashOperator(
@@ -160,7 +170,8 @@ with DAG(
         (
             BashOperator(
                 task_id="visit",
-                bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeVisitSpectrumInApStar --mem=0 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+                # bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeVisitSpectrumInApStar --no-exclusive --mem=100G --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+                bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeVisitSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=100G --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="48:00:00"'
             )
         ) >> (
             BashOperator(
@@ -176,7 +187,7 @@ with DAG(
             BashOperator(
                 task_id="astronn_dist",
                 # astronn_dist does not use GPUS
-                bash_command=f'astra srun astronn_dist --nodes {ASTRONN_DIST_NODES} --time="48:00:00"', # --mem=16000 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
+                bash_command=f'astra srun astronn_dist --nodes {ASTRONN_DIST_NODES} {SKIP_IF_EMPTY} --time="48:00:00"', # --mem=16000 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
                 pool=SDSS_NP_POOL,
                 pool_slots=ASTRONN_DIST_NODES,
             )

@@ -457,6 +457,7 @@ def srun(
     pipeline: Annotated[str, typer.Option(help="Pipeline name, for tasks parameterized by pipeline (e.g. `ASPCAP`).")] = None,
     apreds: Annotated[List[str], typer.Option(help="APOGEE reduction version(s), for tasks that accept an `apreds` parameter.")] = None,
     run2ds: Annotated[List[str], typer.Option(help="BOSS reduction version(s), for tasks that accept a `run2ds` parameter.")] = None,
+    empty_exit_code: Annotated[int, typer.Option(help="Exit code when there is nothing to process (e.g. 99, which Airflow's BashOperator treats as 'skipped').", min=0, max=255)] = 0,
 ):
     """Distribute an Astra task over many nodes using Slurm."""
 
@@ -507,7 +508,7 @@ def srun(
             break
     else:
         log.info(f"No {', or '.join([m.__name__ for m in considered_models])} spectra to process.")
-        sys.exit(0)
+        sys.exit(empty_exit_code)
 
     workers = nodes * procs
     limit = int(np.ceil(total / workers))

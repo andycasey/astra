@@ -232,7 +232,7 @@ These flags apply to the IRFM effective temperature from V-Ks (Gonzalez Hernande
 
 #### `calibrated_flags`
 
-These flags record calibration decisions:
+These flags record calibration decisions. Bits 0-4 were set by the DR19-era corrections (DR19, IPL-3, IPL-4v2) and are deprecated for DR21 and beyond; the DR21 calibration resets them to 0. Bits 5-22 are set by the DR21 Teff and logg calibrations and record where each star sits relative to the calibration boundaries, in the raw Kiel diagram: exactly one of bits 5-10 is set when Teff is calibrated, and exactly one of bits 14-19 when logg is calibrated; stars that cannot be calibrated have bit 13 (Teff) or 22 (logg) set and a NaN value (a float NaN, not a null). In the database a NaN sorts above every number, so a query such as `teff > 6000` also selects these stars; filter on bits 13 and 22 to exclude them.
 
 | Flag name | Bit value | Description |
 |---|---|---|
@@ -241,6 +241,24 @@ These flags record calibration decisions:
 | `flag_as_red_clump_for_calibration` | 2^2 = 4 | Classified as red clump star for logg calibration |
 | `flag_as_m_dwarf_for_calibration` | 2^3 = 8 | Classified as M-dwarf for teff and logg calibration |
 | `flag_censored_logg_for_metal_poor_m_dwarf` | 2^4 = 16 | Censored logg for metal-poor ([M/H] < -0.6) M-dwarf |
+| `flag_teff_unclassified` | 2^5 = 32 | Teff: unclassified (logg < 3.0, Teff >= 5500 K) |
+| `flag_teff_giant` | 2^6 = 64 | Teff: giant (logg < 3.5, 4500 <= Teff < 5500 K) |
+| `flag_teff_giant_clipped` | 2^7 = 128 | Teff: giant below 4500 K; correction frozen at 4500 K |
+| `flag_teff_dwarf` | 2^8 = 256 | Teff: dwarf inside the dwarf window |
+| `flag_teff_m_dwarf` | 2^9 = 512 | Teff: M dwarf; correction mostly switched off |
+| `flag_teff_hot_dwarf` | 2^10 = 1024 | Teff: dwarf above 6500 K; correction frozen at 6500 K |
+| `flag_teff_m_h_clipped` | 2^11 = 2048 | Teff: [M/H] outside (-2.0, +0.5); correction frozen |
+| `flag_teff_logg_clipped` | 2^12 = 4096 | Teff: logg outside (0, 5) |
+| `flag_teff_not_calibrated` | 2^13 = 8192 | Teff: not calibrated |
+| `flag_logg_giant_clamp` | 2^14 = 16384 | logg: giant below the Model D lower clamp (logg < 0.5) |
+| `flag_logg_giant` | 2^15 = 32768 | logg: giant (calibrated logg 0.5-3.35) |
+| `flag_logg_giant_taper` | 2^16 = 65536 | logg: giant in the Model D upper taper (logg >= 3.35) |
+| `flag_logg_hot_dwarf` | 2^17 = 131072 | logg: dwarf above 6000 K; correction frozen at 6000 K |
+| `flag_logg_dwarf` | 2^18 = 262144 | logg: dwarf, 3500 < Teff <= 6000 K |
+| `flag_logg_cool_dwarf` | 2^19 = 524288 | logg: dwarf at or below 3500 K; correction frozen at 3500 K |
+| `flag_logg_m_h_clipped` | 2^20 = 1048576 | logg: [M/H] outside the branch support; correction frozen |
+| `flag_logg_teff_clipped` | 2^21 = 2097152 | logg: Teff outside (3500, 6000) K on the dwarf branch |
+| `flag_logg_not_calibrated` | 2^22 = 4194304 | logg: not calibrated |
 
 #### Per-element abundance flags
 

@@ -71,7 +71,7 @@ class AstroNNdist(PipelineOutputMixin):
                 - a_k_mag
         """
 
-        if self.L_fakemag_err >= self.L_fakemag * 0.2:
+        if self.e_L_fakemag >= self.L_fakemag * 0.2:
             self.flag_fakemag_unreliable = True
 
         if meta is None or missing_photometry:

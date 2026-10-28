@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra"
-version = "0.8.0" 
+version = "1.0.0" 
 readme = "README.md"
 license = "GPL-3.0-or-later"
 description = "Analysis framework for SDSS-V / MWM." 
@@ -16,7 +16,7 @@ maintainers = [
   {name = "Andy Casey", email = "andrew.casey@monash.edu"},
 ]
 dependencies = [
-  "numpy",
+  "numpy<2.3", # required by scipy<1.15.0
   "scipy<1.15.0", # https://github.com/scipy/scipy/issues/22325#issuecomment-2676345163
   "astropy",
   "tqdm",
@@ -30,13 +30,16 @@ dependencies = [
   "scikit-learn",
   "joblib",
   "pandas",
-  "apache-airflow",
+  "apache-airflow>=2.9,<3.0", # lower bound stops the resolver backtracking to unbuildable 1.x
   "decorator",
   "h5py",
   "thread",
   "typer",
   "dustmaps",
-  "fitsio"
+  "fitsio",
+  "torch==2.12.0", # cu126 build; see [tool.uv.sources] below
+  "astronn",
+  "sdss-semaphore",
 ]
 #requires-python = ">= 3.9"
 
@@ -72,3 +75,15 @@ dev = [
   "pre-commit",
   "black",
 ]
+
+# The default PyPI torch wheel is built against CUDA 13, which dropped Volta
+# (sm_70). The GPU nodes here are V100s, so those wheels fail at the first
+# kernel launch with `cudaErrorNoKernelImageForDevice`. The cu126 wheels are the
+# most recent ones still built for sm_70.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }

@@ -98,7 +98,9 @@ def _inference(model, batch):
         except ValueError:
             raise
         else:
-            k_mag_cor = extinction_correction(all_meta[0][0], all_meta[0][2])
+            k_app = np.array([m[0] for m in all_meta])   # per-star apparent K magnitude
+            a_k = np.array([m[2] for m in all_meta])      # per-star A_K extinction
+            k_mag_cor = extinction_correction(k_app, a_k)
             #pc, pc_err = fakemag_to_pc(fakemag, k_mag_cor, fakemag_err['total']) # for the TensorFlow version
             pc, pc_err = fakemag_to_pc(fakemag, k_mag_cor, fakemag_err) # for the PyTorch version
 
@@ -120,12 +122,12 @@ def _inference(model, batch):
                 t_elapsed=mean_t_elapsed,
                 k_mag=all_meta[i][0],
                 ebv = all_meta[i][1],
-                a_k_mag=all_meta[i][2],
+                A_k_mag=all_meta[i][2],
                 L_fakemag=float(np.atleast_1d(fakemag)[i]),
                 #L_fakemag=float(fakemag_err['total']),
-                L_fakemag_err=float(np.atleast_1d(fakemag_err)[i]),
+                e_L_fakemag=float(np.atleast_1d(fakemag_err)[i]),
                 dist=dist,
-                dist_err=dist_err,
+                e_dist=dist_err,
             )
             output.apply_flags(all_meta[i], missing_photometry=missing_photometrys[i], missing_extinction=missing_extinctions[i])
             #print("+"*6, "(_inference) output:", output.__data__)

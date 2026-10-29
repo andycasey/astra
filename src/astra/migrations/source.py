@@ -30,6 +30,21 @@ def update_sdss5_dr19_apogee_flag(chunk_size: int = 1000):
             .execute()
         )
 
+def update_sdss5_dr20_boss_flag(chunk_size: int = 1000):
+    from astropy.io import fits
+    from tqdm import tqdm
+
+    with fits.open("/uufs/chpc.utah.edu/common/home/sdss52/dr20/spectro/astra/0.8.1/summary/mwmAllStar-0.8.1.fits.gz") as image:
+        sdss_ids = list(set(image[1].data["sdss_id"]).difference({0, -1}))
+
+    from astra.models import Source
+    for chunk in tqdm(chunked(sdss_ids, chunk_size)):
+        (
+            Source
+            .update(sdss5_boss_dr20_flag=True)
+            .where(Source.sdss_id.in_(chunk))
+            .execute()
+        )
 
 
 

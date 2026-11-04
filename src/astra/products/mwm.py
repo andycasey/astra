@@ -110,14 +110,15 @@ def create_mwmVisit_and_mwmStar_products(
                     )
 
         for future in concurrent.futures.as_completed(futures):
-            source_pk, flagged_exception, created_visit, created_star = future.result()
+            source_pk, flagged_exception, created_visit, created_star, missing_file_flags = future.result()
             yield MWMSpectrumProductStatus(
                 source_pk=source_pk,
                 flag_skipped_because_no_sdss_id=False,
                 flag_skipped_because_not_stellar_like=False,
                 flag_attempted_but_exception=flagged_exception,
                 flag_created_mwm_visit=created_visit and not flagged_exception,
-                flag_created_mwm_star=created_star and not flagged_exception
+                flag_created_mwm_star=created_star and not flagged_exception,
+                **{f"flag_{k}": v for k, v in missing_file_flags.items()}
             )
 
     """
@@ -180,7 +181,7 @@ def _create_mwmVisit_and_mwmStar_products(
         exists = os.path.exists(mwmStar_path) or os.path.exists(mwmVisit_path)
         t_path_check += time()
         if not overwrite and exists:
-            return (source.pk, False, os.path.exists(mwmVisit_path), os.path.exists(mwmStar_path))
+            return (source.pk, False, os.path.exists(mwmVisit_path), os.path.exists(mwmStar_path), {})
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=VerifyWarning)
@@ -210,6 +211,8 @@ def _create_mwmVisit_and_mwmStar_products(
             )
 
             any_coadd, any_visit = (False, False)
+            # Missing-file flags, combined over both observatories.
+            missing_file_flags = {}
             for i, telescope in enumerate(("apo25m", "lco25m")):
                 observatory = telescope[:3].upper()
 
@@ -235,7 +238,9 @@ def _create_mwmVisit_and_mwmStar_products(
                 # Here we are going to consider things just from the OBSERVATORY so that we include apo1m spectra with apo25m spectra
                 t_apogee_prepare = -time()
                 try:
-                    apogee_coadd, apogee_visit = prepare_apogee_resampled_visit_and_coadd_spectra(source, observatory, apreds)
+                    apogee_coadd, apogee_visit, apogee_missing_file_flags = prepare_apogee_resampled_visit_and_coadd_spectra(source, observatory, apreds)
+                    for k, v in apogee_missing_file_flags.items():
+                        missing_file_flags[k] = missing_file_flags.get(k, False) or v
                 except FileNotFoundError:
                     apogee_coadd = apogee_visit = None
                     log.exception(f"Exception preparing APOGEE spectra for {source} / {observatory} / {apreds}")
@@ -319,12 +324,12 @@ def _create_mwmVisit_and_mwmStar_products(
         log.exception(f"Exception on source {source}")
         if debug:
             raise
-        return (source.pk, True, False, False)
+        return (source.pk, True, False, False, {})
     else:
         #source.updated_mwm_visit_mwm_star_products = datetime.now()
         #source.save()
 
-        return (source.pk, False, any_visit, any_coadd)
+        return (source.pk, False, any_visit, any_coadd, missing_file_flags)
 
 
 def _create_single_model_hdu(

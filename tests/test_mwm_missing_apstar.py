@@ -18,8 +18,8 @@ os.environ["ASTRA_DATABASE_PATH"] = ":memory:"
 
 import numpy as np
 import pytest
+from peewee import SqliteDatabase
 
-from astra.models.base import database
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.apogee import ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
@@ -65,9 +65,16 @@ RESAMPLED_FLUX = 99.0
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    database.drop_tables(MODELS)
-    database.create_tables(MODELS)
+    # Use a private in-memory database: the shared test database has tables (from other test
+    # modules) with foreign keys to Source/Spectrum, so those cannot be dropped and recreated here.
+    test_database = SqliteDatabase(":memory:")
+    with test_database.bind_ctx(MODELS, bind_refs=False, bind_backrefs=False):
+        test_database.create_tables(MODELS)
+        yield from _env(tmp_path, monkeypatch)
+    test_database.close()
 
+
+def _env(tmp_path, monkeypatch):
     state = dict(missing_apvisit_mjds=set(), failing_resample_mjds=set())
 
     def apstar_path(self):
@@ -117,7 +124,6 @@ def env(tmp_path, monkeypatch):
 
     state["tmp_path"] = tmp_path
     yield state
-    database.drop_tables(MODELS)
 
 
 def _source():

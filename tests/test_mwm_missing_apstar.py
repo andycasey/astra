@@ -24,7 +24,31 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.apogee import ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
 from astra.models.mwm import ApogeeCombinedSpectrum, ApogeeRestFrameVisitSpectrum
-import astra.products.apogee as apogee_products
+import astra.specutils.continuum.nmf.apogee as nmf_apogee
+
+
+class FakeContinuumModel:
+
+    def __init__(self, *args, **kwargs):
+        # `astra.products.apogee` masks unmodelled pixels in `components` at import time.
+        self.components = np.ones((1, 8575))
+
+    def fit(self, flux, ivar, full_output=False):
+        meta = dict(rchi2=1.0, theta=np.zeros(3), W=np.ones(3), rectified_model_flux=np.ones_like(flux))
+        return (np.ones_like(flux), ), meta
+
+    def _theta_step(self, flux, ivar, rectified_model_flux):
+        return None, np.ones_like(flux)
+
+
+# `astra.products.apogee` builds an `ApogeeNMFContinuum()` at import, which loads a components file
+# from $MWM_ASTRA. Swap in the fake class just for that import so the tests need no files on disk.
+_ApogeeNMFContinuum = nmf_apogee.ApogeeNMFContinuum
+nmf_apogee.ApogeeNMFContinuum = FakeContinuumModel
+try:
+    import astra.products.apogee as apogee_products
+finally:
+    nmf_apogee.ApogeeNMFContinuum = _ApogeeNMFContinuum
 
 MODELS = [
     Source, Spectrum,
@@ -37,16 +61,6 @@ APRED = {"sdss5": "1.6", "dr17": "dr17"}
 # Flux values that identify where a visit's spectrum came from.
 APSTAR_FLUX = {"sdss5": 5.0, "dr17": 17.0}
 RESAMPLED_FLUX = 99.0
-
-
-class FakeContinuumModel:
-
-    def fit(self, flux, ivar, full_output=False):
-        meta = dict(rchi2=1.0, theta=np.zeros(3), W=np.ones(3), rectified_model_flux=np.ones_like(flux))
-        return (np.ones_like(flux), ), meta
-
-    def _theta_step(self, flux, ivar, rectified_model_flux):
-        return None, np.ones_like(flux)
 
 
 @pytest.fixture

@@ -48,6 +48,7 @@ def snow_white(
     """
 
     from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
+    from astra.pipelines.snow_white.pca_model import load_pca_model
     def refit(fit_params,spec_nl,spec_w,emu,wref):
         first_T=fit_params['teff'].value
         if first_T>=16000 and first_T<=40000:
@@ -74,8 +75,7 @@ def snow_white(
     #with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
     #    emu = pickle.load(pickle_file)
 
-    with open(os.path.join(PIPELINE_DATA_DIR, "pca_spectral_model_SDSS.pkl"), "rb") as pickle_file:
-        emu = pickle.load(pickle_file)
+    emu = load_pca_model(os.path.join(PIPELINE_DATA_DIR, "pca_spectral_model_SDSS.npz"))
     wref=emu["wavelength"]
 
     for spectrum in spectra:

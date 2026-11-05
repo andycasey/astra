@@ -8,6 +8,7 @@ from scipy import interpolate
 import os
 
 from astra.utils import expand_path
+from astra.pipelines.snow_white.pca_model import reconstruct_spectrum
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
@@ -425,18 +426,6 @@ def tmp_func_rv(_T, _g,_rv,_sn, _l, emu,wref,mode):
 def generate_modelDA(teff,logg,emu):
     recovered = emu([np.log10(teff), logg])
     return(recovered)
-
-def reconstruct_spectrum(teff, logg,pca_model):
-    interp_coeffs = pca_model["interp_coeffs"]
-    pca = pca_model["pca"]
-    K = pca.n_components_
-    c = np.array([
-        interp_coeffs[k](teff, logg)[0, 0]
-        for k in range(K)
-    ])
-
-    log_flux = pca.mean_ + np.dot(c, pca.components_)
-    return np.exp(log_flux)
 
 def convolve_gaussian(spec, FWHM):
   """

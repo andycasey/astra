@@ -238,7 +238,7 @@ def line_func_rv_old(params, _sn, _l, emu, wref):
     _rv = parvals['rv']
 
     # Generate model spectrum
-    recovered = generate_modelDA(_T, _g, emu)
+    recovered = reconstruct_spectrum(_T, _g, emu)
     model = np.stack((wref, recovered), axis=-1)
     #model = convolve_gaussian_R(model, 1700)
     model[:, 0] += _rv  # Doppler shift
@@ -288,7 +288,7 @@ def line_func_rv_old(params,_sn, _l,emu,wref):
     _T = parvals['teff']
     _g = parvals['logg']
     _rv = parvals['rv']
-    recovered=generate_modelDA(_T,(_g),emu)
+    recovered=reconstruct_spectrum(_T,(_g),emu)
     model=np.stack((wref,recovered),axis=-1)
     model=convolve_gaussian_R(model,1700)
     #model2=convolve_gaussian_R(model,2100)#5.487*2)
@@ -367,7 +367,7 @@ def fit_func(x,specn,lcrop,emu,wref,mode=0):
 
 def tmp_func_rv(_T, _g,_rv,_sn, _l, emu,wref,mode):
     c = 299792.458 # Speed of light in km/s=
-    recovered=generate_modelDA(_T,(_g),emu)
+    recovered=reconstruct_spectrum(_T,(_g),emu)
     model=np.stack((wref,recovered),axis=-1)
     #if mode!=2:
      #   model1=convolve_gaussian_R(model,400)#5.487*2)
@@ -487,9 +487,9 @@ def hot_vs_cold_col(T1,g1,T2,g2,bp_rp,emu,wref):
     #print(T1,g1,"parameters1")
     #print(T2,g2,"parameters2")
     #print("bp_rp=",bp_rp)
-    flux1=generate_modelDA(T1,g1*100,emu)
+    flux1=reconstruct_spectrum(T1,g1*100,emu)
     wave1=wref
-    flux2=generate_modelDA(T2,g2*100,emu)
+    flux2=reconstruct_spectrum(T2,g2*100,emu)
     wave2=wref
 
     flux_bp1,mag_bp1=synthBp(wave1,flux1)
@@ -508,13 +508,13 @@ def hot_vs_cold(T1,g1,T2,g2,parallax,GaiaG,emu,wref):
     M_bol_sun, Teff_sun, Rsun_cm, R_sun_pc = 4.75, 5780., 69.5508e9, 2.2539619954370203e-08
     R1=R_from_Teff_logg(T1, g1)
     R2=R_from_Teff_logg(T2, g2)
-    mod1=generate_modelDA(T1,g1*100,emu)
+    mod1=reconstruct_spectrum(T1,g1*100,emu)
     #flux1=(mod1/1e8)/((1000/parallax)*3.086e18)
     #flux1=flux1/((1000/parallax)*3.086e18)
     #flux1=flux1*(np.pi*(R1*Rsun_cm)**2)
     flux1=((mod1)/((1000/parallax)*3.086e18)**2)*4*(np.pi*(R1*Rsun_cm)**2)
     wave1=wref
-    mod2=generate_modelDA(T2,g2*100,emu)
+    mod2=reconstruct_spectrum(T2,g2*100,emu)
     #flux2=(mod2/1e8)/(((1000/parallax)*3.086e18)**2)*(np.pi*(R2*Rsun_cm)**2)
     #flux2=(mod2/1e8)/((1000/parallax)*3.086e18)
     #flux2=flux2/((1000/parallax)*3.086e18)

@@ -1986,6 +1986,9 @@ def apply_dr21_parameter_corrections(batch_size: int = 500):
             a[a < -900] = np.nan
         return a
 
+    # Uncertainties are not calibrated: copy them column-to-column in SQL.
+    ASPCAP.update(e_teff=ASPCAP.raw_e_teff, e_logg=ASPCAP.raw_e_logg).execute()
+
     q = ASPCAP.select()
     with tqdm(total=0, desc="Applying corrections") as pb:
         for chunk in chunked(q, batch_size):
@@ -2003,17 +2006,13 @@ def apply_dr21_parameter_corrections(batch_size: int = 500):
                     chunk, teff_cal_array, logg_cal_array, flags_array):
                 r.teff = float(teff_cal_val)    # NaN where not calibrated
                 r.logg = float(logg_cal_val)
-                r.e_teff = r.raw_e_teff
-                r.e_logg = r.raw_e_logg
                 r.calibrated_flags = int(flags_val)    # resets the deprecated bits 0-4
 
             ASPCAP.bulk_update(
                 chunk,
                 fields=[
                     ASPCAP.teff,
-                    ASPCAP.e_teff,
                     ASPCAP.logg,
-                    ASPCAP.e_logg,
                     ASPCAP.calibrated_flags,
                 ]
             )

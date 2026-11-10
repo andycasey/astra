@@ -1,0 +1,6 @@
+from astra.pipelines.aspcap import corrections
+corrections.apply_dr21_parameter_corrections()
+corrections.apply_dr19_solar_neighbourhood_abundance_corrections()
+corrections.flag_boundaries_and_abundances()
+corrections.flag_upper_limits_by_hayes_2022()
+corrections.apply_flags()

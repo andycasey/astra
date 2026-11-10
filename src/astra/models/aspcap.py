@@ -595,11 +595,32 @@ class ASPCAP(PipelineOutputMixin):
 
     #> Calibration flags
     calibrated_flags = BitField(null=True, help_text="Calibration flags")
+    # Bits 0-4: DR19-era corrections (DR19, IPL-3, IPL-4v2); deprecated for DR21 and beyond
     flag_as_dwarf_for_calibration = calibrated_flags.flag(2**0, "Classified as main-sequence star for logg calibration")
     flag_as_giant_for_calibration = calibrated_flags.flag(2**1, "Classified as red giant branch star for logg calibration")
     flag_as_red_clump_for_calibration = calibrated_flags.flag(2**2, "Classified as red clump star for logg calibration")
     flag_as_m_dwarf_for_calibration = calibrated_flags.flag(2**3, "Classifed as M-dwarf for teff and logg calibration")
     flag_censored_logg_for_metal_poor_m_dwarf = calibrated_flags.flag(2**4, "Censored logg for metal-poor ([M/H] < -0.6) M-dwarf")
+    # Bits 5-22: DR21 corrections. Teff: exactly one of bits 5-10 is set when Teff is calibrated
+    flag_teff_unclassified = calibrated_flags.flag(2**5, "Teff: unclassified (logg < 3.0, Teff >= 5500 K)")
+    flag_teff_giant = calibrated_flags.flag(2**6, "Teff: giant (logg < 3.5, 4500 <= Teff < 5500 K)")
+    flag_teff_giant_clipped = calibrated_flags.flag(2**7, "Teff: giant below 4500 K; correction frozen at 4500 K")
+    flag_teff_dwarf = calibrated_flags.flag(2**8, "Teff: dwarf inside the dwarf window")
+    flag_teff_m_dwarf = calibrated_flags.flag(2**9, "Teff: M dwarf; correction mostly switched off")
+    flag_teff_hot_dwarf = calibrated_flags.flag(2**10, "Teff: dwarf above 6500 K; correction frozen at 6500 K")
+    flag_teff_m_h_clipped = calibrated_flags.flag(2**11, "Teff: [M/H] outside (-2.0, +0.5); correction frozen")
+    flag_teff_logg_clipped = calibrated_flags.flag(2**12, "Teff: logg outside (0, 5)")
+    flag_teff_not_calibrated = calibrated_flags.flag(2**13, "Teff: not calibrated")
+    # logg: exactly one of bits 14-19 is set when logg is calibrated
+    flag_logg_giant_clamp = calibrated_flags.flag(2**14, "logg: giant below the Model D lower clamp (logg < 0.5)")
+    flag_logg_giant = calibrated_flags.flag(2**15, "logg: giant (calibrated logg 0.5-3.35)")
+    flag_logg_giant_taper = calibrated_flags.flag(2**16, "logg: giant in the Model D upper taper (logg >= 3.35)")
+    flag_logg_hot_dwarf = calibrated_flags.flag(2**17, "logg: dwarf above 6000 K; correction frozen at 6000 K")
+    flag_logg_dwarf = calibrated_flags.flag(2**18, "logg: dwarf, 3500 < Teff <= 6000 K")
+    flag_logg_cool_dwarf = calibrated_flags.flag(2**19, "logg: dwarf at or below 3500 K; correction frozen at 3500 K")
+    flag_logg_m_h_clipped = calibrated_flags.flag(2**20, "logg: [M/H] outside the branch support; correction frozen")
+    flag_logg_teff_clipped = calibrated_flags.flag(2**21, "logg: Teff outside (3500, 6000) K on the dwarf branch")
+    flag_logg_not_calibrated = calibrated_flags.flag(2**22, "logg: not calibrated")
     mass = FloatField(null=True, help_text="Mass inferred from isochrones [M_sun]")
     radius = FloatField(null=True, help_text="Radius inferred from isochrones [R_sun]")
     

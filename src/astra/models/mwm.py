@@ -70,7 +70,10 @@ class MWMSpectrumProductStatus(BaseModel):
     flag_attempted_but_exception = flags.flag(2**2, "An exception was raised during processing")
     flag_created_mwm_visit = flags.flag(2**3, "MWM visit spectrum was created")
     flag_created_mwm_star = flags.flag(2**4, "MWM star spectrum was created")
-    
+    flag_missing_apstar_file = flags.flag(2**5, "An apStar file in the database was missing on disk; fell back to an older apStar or the apVisit")
+    flag_missing_apvisit_file = flags.flag(2**6, "An apVisit file in the database was missing on disk; that visit was omitted")
+    flag_apogee_visits_without_coadd = flags.flag(2**7, "APOGEE visits were written to mwmVisit, but no apStar file existed to provide an mwmStar coadd")
+
     class Meta:
         constraints = [
             SQL("UNIQUE (source_pk, v_astra_major_minor)")

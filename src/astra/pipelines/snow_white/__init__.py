@@ -48,6 +48,7 @@ def snow_white(
     """
 
     from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
+    from astra.pipelines.snow_white.pca_model import load_pca_model
     def refit(fit_params,spec_nl,spec_w,emu,wref):
         first_T=fit_params['teff'].value
         if first_T>=16000 and first_T<=40000:
@@ -61,18 +62,21 @@ def snow_white(
         l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
         new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="least_squares",loss='soft_l1')
         return(new_best)
-    #with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f:
-    with open(os.path.join(PIPELINE_DATA_DIR, '20240801_training_file'), 'rb') as f:
+    #with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f: 20240801_training_file
+    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_20092025'), 'rb') as f:
         kf = pickle.load(f, fix_imports=True)
 
     kf.verbose = 0
 
-    wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref_sdss.npy"))
+    #wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref_sdss.npy"))
 
     # Once again, we hhave to put this stupid hack in
-    sys.path.insert(0, os.path.dirname(__file__))
-    with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
-        emu = pickle.load(pickle_file)
+    #sys.path.insert(0, os.path.dirname(__file__))
+    #with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
+    #    emu = pickle.load(pickle_file)
+
+    emu = load_pca_model(os.path.join(PIPELINE_DATA_DIR, "pca_spectral_model_SDSS.npz"))
+    wref=emu["wavelength"]
 
     for spectrum in spectra:
 

@@ -8,6 +8,7 @@ from scipy import interpolate
 import os
 
 from astra.utils import expand_path
+from astra.pipelines.snow_white.pca_model import reconstruct_spectrum
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
@@ -172,7 +173,7 @@ def norm_spectra(spectra,model=True,add_infinity=False,mod=True):
 #======================================================================
     return spectra_ret, cont_flux
 
-def line_func_rv(params, _sn, _l, emu, wref):
+def line_func_rv(params, _sn, _l, pca_model, wref):
     import numpy as np
     from scipy import interpolate
 
@@ -182,7 +183,63 @@ def line_func_rv(params, _sn, _l, emu, wref):
     _rv = parvals['rv']
 
     # Generate model spectrum
-    recovered = generate_modelDA(_T, _g, emu)
+    #recovered = generate_modelDA(_T, _g, emu)
+    recovered = reconstruct_spectrum(_T, _g, pca_model)
+
+    model = np.stack((wref, recovered), axis=-1)
+    #model = convolve_gaussian_R(model, 1700)
+    model[:, 0] += _rv  # Doppler shift
+    # Normalize model
+    norm_model = da_line_normalize(model, _l)
+    m_wave_n, m_flux_n = norm_model[:, 0], norm_model[:, 1]
+
+    # Observed data
+    sn_w, sn_f, sn_e = _sn[:, 0], _sn[:, 1], _sn[:, 2]
+
+    residuals = []
+
+    for i in range(len(_l)):
+        l0, l1 = _l[i, 0], _l[i, 1]
+
+        # Mask observed data within window
+        mask = (sn_w >= l0) & (sn_w <= l1)
+        w_obs = sn_w[mask]
+        f_obs = sn_f[mask]
+        e_obs = sn_e[mask]
+
+        if len(w_obs) < 3:
+            continue  # skip poorly sampled regions
+
+        # Interpolate model to observed wavelengths
+        try:
+            interp_model = interpolate.interp1d(m_wave_n, m_flux_n, kind='linear', bounds_error=False, fill_value="extrapolate")
+            f_model = interp_model(w_obs)
+        except Exception:
+            return np.ones(len(residuals)) * 1e6  # Fallback if interpolation fails
+
+        # Compute residuals for this line
+        #line_resid = (f_model-f_obs) / e_obs#e_obs
+        r=(f_model-f_obs) / e_obs
+        #residuals.append(line_resid)
+        residuals.append(np.sign(r)*np.sqrt(np.abs(r)))
+    if len(residuals) == 0:
+        # Fallback in case no lines matched — return high residuals
+        return np.ones(10) * 1e6
+
+    # Flatten into one residual vector (now length only depends on _sn and _l, not params)
+    return np.concatenate(residuals)
+
+def line_func_rv_old(params, _sn, _l, emu, wref):
+    import numpy as np
+    from scipy import interpolate
+
+    parvals = params.valuesdict()
+    _T = parvals['teff']
+    _g = parvals['logg']
+    _rv = parvals['rv']
+
+    # Generate model spectrum
+    recovered = reconstruct_spectrum(_T, _g, emu)
     model = np.stack((wref, recovered), axis=-1)
     #model = convolve_gaussian_R(model, 1700)
     model[:, 0] += _rv  # Doppler shift
@@ -232,7 +289,7 @@ def line_func_rv_old(params,_sn, _l,emu,wref):
     _T = parvals['teff']
     _g = parvals['logg']
     _rv = parvals['rv']
-    recovered=generate_modelDA(_T,(_g),emu)
+    recovered=reconstruct_spectrum(_T,(_g),emu)
     model=np.stack((wref,recovered),axis=-1)
     model=convolve_gaussian_R(model,1700)
     #model2=convolve_gaussian_R(model,2100)#5.487*2)
@@ -311,7 +368,7 @@ def fit_func(x,specn,lcrop,emu,wref,mode=0):
 
 def tmp_func_rv(_T, _g,_rv,_sn, _l, emu,wref,mode):
     c = 299792.458 # Speed of light in km/s=
-    recovered=generate_modelDA(_T,(_g),emu)
+    recovered=reconstruct_spectrum(_T,(_g),emu)
     model=np.stack((wref,recovered),axis=-1)
     #if mode!=2:
      #   model1=convolve_gaussian_R(model,400)#5.487*2)
@@ -370,8 +427,6 @@ def generate_modelDA(teff,logg,emu):
     recovered = emu([np.log10(teff), logg])
     return(recovered)
 
-
-
 def convolve_gaussian(spec, FWHM):
   """
   Convolve spectrum with a Gaussian with specifed FWHM.
@@ -421,9 +476,9 @@ def hot_vs_cold_col(T1,g1,T2,g2,bp_rp,emu,wref):
     #print(T1,g1,"parameters1")
     #print(T2,g2,"parameters2")
     #print("bp_rp=",bp_rp)
-    flux1=generate_modelDA(T1,g1*100,emu)
+    flux1=reconstruct_spectrum(T1,g1*100,emu)
     wave1=wref
-    flux2=generate_modelDA(T2,g2*100,emu)
+    flux2=reconstruct_spectrum(T2,g2*100,emu)
     wave2=wref
 
     flux_bp1,mag_bp1=synthBp(wave1,flux1)
@@ -442,13 +497,13 @@ def hot_vs_cold(T1,g1,T2,g2,parallax,GaiaG,emu,wref):
     M_bol_sun, Teff_sun, Rsun_cm, R_sun_pc = 4.75, 5780., 69.5508e9, 2.2539619954370203e-08
     R1=R_from_Teff_logg(T1, g1)
     R2=R_from_Teff_logg(T2, g2)
-    mod1=generate_modelDA(T1,g1*100,emu)
+    mod1=reconstruct_spectrum(T1,g1*100,emu)
     #flux1=(mod1/1e8)/((1000/parallax)*3.086e18)
     #flux1=flux1/((1000/parallax)*3.086e18)
     #flux1=flux1*(np.pi*(R1*Rsun_cm)**2)
     flux1=((mod1)/((1000/parallax)*3.086e18)**2)*4*(np.pi*(R1*Rsun_cm)**2)
     wave1=wref
-    mod2=generate_modelDA(T2,g2*100,emu)
+    mod2=reconstruct_spectrum(T2,g2*100,emu)
     #flux2=(mod2/1e8)/(((1000/parallax)*3.086e18)**2)*(np.pi*(R2*Rsun_cm)**2)
     #flux2=(mod2/1e8)/((1000/parallax)*3.086e18)
     #flux2=flux2/((1000/parallax)*3.086e18)

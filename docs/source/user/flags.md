@@ -287,6 +287,7 @@ All per-element abundance flag fields share a common pattern of bit definitions:
 | 2^9 = 512 | Grid edge warning |
 | 2^10 = 1024 | Abundances known to be unreliable for this Teff |
 | 2^11 = 2048 | Abundances known to be unreliable for this [M/H] |
+| 2^12 = 4096 | Abundances known to be unreliable for the M giant grid |
 
 ### FERRE (intermediate models)
 

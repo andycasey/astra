@@ -343,6 +343,25 @@ def flag_boundaries_and_abundances():
     # ti_h < 4250
     # v_h < 4250
 
+    # Warn on abundances from the M giant grid (short_grid_name contains 'Mg').
+    m_giant_warn_abundances = [
+        "al_h", "c_12_13", "ca_h", "ce_h", "c_h", "co_h", "cr_h", "cu_h",
+        "fe_h", "k_h", "mg_h", "mn_h", "na_h", "nd_h", "ni_h", "n_h",
+        "o_h", "p_h", "si_h", "s_h", "ti_h", "v_h",
+    ]
+    for field_name in m_giant_warn_abundances:
+        print("Setting M giant warning for", field_name)
+        flag_m_giant = getattr(ASPCAP, f"flag_{field_name}_warn_m_giant")
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_m_giant.set()})
+            .where(
+                (ASPCAP.v_astra_major_minor >= 7)
+            &   (ASPCAP.short_grid_name % "%Mg%")  # case-sensitive LIKE (.contains() is ILIKE)
+            )
+            .execute()
+        )
+
 
 
 

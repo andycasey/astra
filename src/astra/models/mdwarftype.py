@@ -15,6 +15,7 @@ class MDwarfType(PipelineOutputMixin):
 
     flag_suspicious = result_flags.flag(2**0, "Spectral type is K5.0, suspicious for M dwarf")
     flag_exception = result_flags.flag(2**1, "Runtime exception during processing")
+    flag_bad_trace_tab = result_flags.flag(2**2, "Input spectrum has DRP BadTraceTAB set: red/blue channel of different targets")
 
     @hybrid_property
     def flag_bad(self):

@@ -3,7 +3,7 @@
 import concurrent.futures
 import numpy as np
 from peewee import JOIN, fn
-from astra.models.boss import BossVisitSpectrum
+from astra.models.boss import BossVisitSpectrum, has_bad_trace_tab
 from astra.models.mwm import BossCombinedSpectrum, BossRestFrameVisitSpectrum
 from astra.specutils.resampling import resample, pixel_weighted_spectrum
 from astra.specutils.continuum.nmf.boss import BossNMFContinuum
@@ -38,19 +38,13 @@ def _prefetch_visit_pixel_data(spectrum):
     return spectrum
 
 
-def _has_bad_trace_tab(spectrum):
-    # DRP processed red/blue channels of different targets into this spectrum: never use it
-    # for star-level (coadd / RV) quantities. Treat a missing/null value as not flagged.
-    return bool(getattr(spectrum, "flag_bad_trace_tab", False))
-
-
 def include_boss_spectrum_in_coadd(spectrum, is_mwm_wd):
     return (
         np.isfinite(spectrum.snr)
     &   (spectrum.snr > 3)
     &   ((spectrum.xcsao_rxc > 6) | is_mwm_wd)
     &   (spectrum.zwarning_flags <= 0)
-    &   (not _has_bad_trace_tab(spectrum))
+    &   (not has_bad_trace_tab(spectrum))
     )
 
 
@@ -58,7 +52,7 @@ def include_boss_spectrum_in_rv_calculation(spectrum):
     return (
         np.isfinite(spectrum.xcsao_v_rad)
     &   (spectrum.xcsao_rxc > 6)
-    &   (not _has_bad_trace_tab(spectrum))
+    &   (not has_bad_trace_tab(spectrum))
     )
 
 def weighted_average(x, e_x):

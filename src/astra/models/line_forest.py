@@ -1,10 +1,23 @@
-from astra.fields import ArrayField, FloatField
+from playhouse.hybrid import hybrid_property
+from astra.fields import ArrayField, FloatField, BitField
 from astra.models.pipeline import PipelineOutputMixin
 
 class LineForest(PipelineOutputMixin):
 
     """A result from the LineForest pipeline."""
-    
+
+    #> Summary Statistics
+    result_flags = BitField(default=0)
+    flag_bad_trace_tab = result_flags.flag(2**0, help_text="Input spectrum has DRP BadTraceTAB set: red/blue channel of different targets")
+
+    @hybrid_property
+    def flag_bad(self):
+        return self.flag_bad_trace_tab
+
+    @flag_bad.expression
+    def flag_bad(self):
+        return self.flag_bad_trace_tab
+
     #> H-alpha (6562.8 +/- 200A)
     eqw_h_alpha = FloatField(null=True)
     abs_h_alpha = FloatField(null=True)

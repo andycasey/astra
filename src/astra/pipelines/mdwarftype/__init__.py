@@ -9,6 +9,7 @@ from tqdm import tqdm
 from astra import task
 from astra.models.mwm import BossVisitSpectrum, BossCombinedSpectrum
 from astra.models.mdwarftype import MDwarfType
+from astra.models.boss import has_bad_trace_tab
 from astra.utils import log, expand_path
 
 
@@ -82,17 +83,18 @@ def _mdwarf_type(spectra, template_flux, template_type):
 
             result_flags = 1 if spectral_type == "K5.0" else 0
 
-            results.append(
-                MDwarfType(
-                    spectrum_pk=spectrum.spectrum_pk,
-                    source_pk=spectrum.source_pk,
-                    spectral_type=spectral_type,
-                    sub_type=sub_type,
-                    continuum=continuum,
-                    rchi2=rchi2,
-                    result_flags=result_flags
-                )
+            result = MDwarfType(
+                spectrum_pk=spectrum.spectrum_pk,
+                source_pk=spectrum.source_pk,
+                spectral_type=spectral_type,
+                sub_type=sub_type,
+                continuum=continuum,
+                rchi2=rchi2,
+                result_flags=result_flags
             )
+            # Set after construction so it is not overwritten by `result_flags`.
+            result.flag_bad_trace_tab = has_bad_trace_tab(spectrum)
+            results.append(result)
         except:
             log.exception(f"Exception in MDwarfType for spectrum {spectrum}")
             continue

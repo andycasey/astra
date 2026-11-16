@@ -5,7 +5,7 @@ from peewee import JOIN
 from typing import Iterable, Optional
 from tqdm import tqdm
 from astra import task, __version__
-from astra.models.boss import BossVisitSpectrum
+from astra.models.boss import BossVisitSpectrum, has_bad_trace_tab
 from astra.models.corv import Corv
 from astra.models.snow_white import SnowWhite
 from astra.models.mwm import BossCombinedSpectrum
@@ -98,6 +98,7 @@ def _corv(spectrum, corv_model):
         initial_teff=result.init_values["teff"],
         initial_logg=result.init_values["logg"],
         initial_v_rad=result.init_values["RV"],
+        flag_bad_trace_tab=has_bad_trace_tab(spectrum),
     )
 
 

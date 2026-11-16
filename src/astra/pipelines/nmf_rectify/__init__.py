@@ -5,6 +5,7 @@ from typing import Iterable, Optional
 import concurrent.futures
 from astra.models import Source, BossVisitSpectrum, ApogeeCoaddedSpectrumInApStar
 from astra.models.nmf_rectify import NMFRectify
+from astra.models.boss import has_bad_trace_tab
 from astra.specutils.continuum.nmf.apogee import ApogeeNMFContinuum
 from astra.specutils.continuum.nmf.boss import BossNMFContinuum
 from astra import task, __version__
@@ -248,6 +249,7 @@ def _rectify_boss_spectra_by_source(sources, model):
             &   (s.snr > 3)
             &   ((s.xcsao_rxc > 6) | ("mwm_wd" in source.sdss5_cartons["program"]))
             &   (s.zwarning_flags <= 0)
+            &   (not has_bad_trace_tab(s))
         )
         spectra = list(filter(boss_callable_in_coadd, source.boss_visit_spectra))
         

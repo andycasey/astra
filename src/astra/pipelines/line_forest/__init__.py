@@ -17,7 +17,7 @@ from collections import OrderedDict
 from typing import Iterable, Optional, Union
 
 from astra.models.mwm import BossCombinedSpectrum
-from astra.models.boss import BossVisitSpectrum
+from astra.models.boss import BossVisitSpectrum, has_bad_trace_tab
 from astra.models.line_forest import LineForest
 from peewee import ModelSelect
 
@@ -165,6 +165,7 @@ def _line_forest(spectrum, steps, reps, debug=False, **kwargs):
         result_kwds.update(dict(
             source_pk=spectrum.source_pk,
             spectrum_pk=spectrum.spectrum_pk,
+            flag_bad_trace_tab=has_bad_trace_tab(spectrum),
         ))
 
         for name, model_path, wavelength_air, minmax in LINES:

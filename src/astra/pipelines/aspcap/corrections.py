@@ -53,6 +53,157 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+class _TeffLinearInMH:
+    """A Teff limit that varies linearly with [M/H] between two (m_h, teff) points."""
+
+    def __init__(self, point_1, point_2):
+        (self.m_h_1, self.teff_1), (self.m_h_2, self.teff_2) = point_1, point_2
+
+    def __call__(self, m_h):
+        slope = (self.teff_2 - self.teff_1) / (self.m_h_2 - self.m_h_1)
+        return self.teff_1 + (m_h - self.m_h_1) * slope
+
+
+def _two_cut_mh_regions(teff_min, teff_max_metal_poor, m_h_metal_poor, teff_max_metal_rich, m_h_metal_rich):
+    """
+    Table 6 rows with two [M/H] cuts, e.g. "4600-3500 K, [M/H] < -1" and
+    "6000-3500 K, [M/H] > -0.5". Allows for the Teff limit to be
+    linearly interpolated between the two cuts for intermediate [M/H].
+    """
+    return [
+        dict(teff=(teff_min, teff_max_metal_poor), m_h=(None, m_h_metal_poor)),
+        dict(
+            teff=(teff_min, _TeffLinearInMH(
+                (m_h_metal_poor, teff_max_metal_poor),
+                (m_h_metal_rich, teff_max_metal_rich),
+            )),
+            m_h=(m_h_metal_poor, m_h_metal_rich),
+        ),
+        dict(teff=(teff_min, teff_max_metal_rich), m_h=(m_h_metal_rich, None)),
+    ]
+
+
+_CNO_TWO_CUT = _two_cut_mh_regions(3500, 4600, -1.0, 6000, -0.5)
+
+# Optimal regions from Table 6 of Meszaros et al. (2025, AJ 170, 96; DR19 ASPCAP).
+# For each abundance: (giant regions, dwarf regions), where giants have
+# raw_logg < 3.8 and dwarfs raw_logg >= 3.8. Each region is a dict with
+#   teff: (min, max)          max may be a _TeffLinearInMH
+#   m_h:  (min, max)          optional; None = unbounded
+#   x_m:  (min, max)          optional; [X/M] = x_h - m_h_atm
+# A star is in the optimal region if it is inside ANY of its class's regions.
+# An empty list means "nowhere" (always warn). Fe is not in Table 6.
+TABLE6_OPTIMAL_REGIONS = {
+    "al_h": (
+        [dict(teff=(4250, 6000)), dict(teff=(3700, 4250), x_m=(0.05, None))],
+        [dict(teff=(4250, 7000))],
+    ),
+    "c_12_13": ([], []),
+    "ca_h": (
+        [dict(teff=(4000, 6000), m_h=(-2.0, None))],
+        [dict(teff=(3500, 7000), m_h=(-2.0, None))],
+    ),
+    "ce_h": (
+        [dict(teff=(4000, 6000), m_h=(-1.5, None))],
+        [],
+    ),
+    "c_h": (
+        _CNO_TWO_CUT,
+        [dict(teff=(3500, 6000), m_h=(-0.5, None))],
+    ),
+    "co_h": (
+        [dict(teff=(3700, 6000))],
+        [],
+    ),
+    "cr_h": (
+        [dict(teff=(3700, 6000), m_h=(-1.0, None))],
+        [dict(teff=(4250, 6000), m_h=(-1.0, None))],
+    ),
+    "cu_h": ([], []),
+    "k_h": (
+        [dict(teff=(4000, 6000))],
+        [dict(teff=(3500, 6500))],
+    ),
+    "mg_h": (
+        [dict(teff=(3200, 6500))],
+        [dict(teff=(3500, 7000))],
+    ),
+    "mn_h": (
+        [dict(teff=(3700, 6000))],
+        [dict(teff=(4000, 7000))],
+    ),
+    "na_h": (
+        [dict(teff=(3500, 5500), m_h=(-0.7, None))],
+        [dict(teff=(4250, 5500), m_h=(-0.7, None))],
+    ),
+    "nd_h": (
+        [dict(teff=(4250, 6000), m_h=(-1.5, None))],
+        [dict(teff=(4250, 5500), m_h=(-1.5, None))],
+    ),
+    "ni_h": (
+        [dict(teff=(4250, 6500)), dict(teff=(3700, 4250), x_m=(-0.1, None))],
+        [dict(teff=(3500, 7000))],
+    ),
+    "n_h": (
+        _CNO_TWO_CUT,
+        [],
+    ),
+    "o_h": (
+        _CNO_TWO_CUT,
+        _CNO_TWO_CUT,
+    ),
+    "p_h": ([], []),
+    "si_h": (
+        [dict(teff=(3200, 7000))],
+        [dict(teff=(3500, 7000))],
+    ),
+    "s_h": (
+        [dict(teff=(3500, 6000))],
+        [dict(teff=(4500, 6000))],
+    ),
+    "ti_h": (
+        [dict(teff=(4000, 5500))],
+        [dict(teff=(4250, 5500))],
+    ),
+    "v_h": ([], []),
+}
+
+
+def in_table6_optimal_region(regions, teff, m_h, x_m, is_finite):
+    """
+    Build the "inside the Table 6 optimal region" condition.
+
+    Works on peewee expressions (for SQL updates) and on numpy arrays, because
+    it only uses comparison, arithmetic, `&` and `|`. `is_finite(x)` must
+    return the backend's "not NULL and not NaN" condition; it guards [M/H] and
+    [X/M] so a missing value never counts as inside the region.
+
+    Returns None if `regions` is empty ("nowhere").
+    """
+    inside = None
+    for region in regions:
+        teff_min, teff_max = region["teff"]
+        if callable(teff_min):
+            teff_min = teff_min(m_h)
+        if callable(teff_max):
+            teff_max = teff_max(m_h)
+        cond = (teff >= teff_min) & (teff <= teff_max)
+        if callable(region["teff"][0]) or callable(region["teff"][1]):
+            cond = cond & is_finite(m_h)
+
+        for key, value in (("m_h", m_h), ("x_m", x_m)):
+            if key not in region:
+                continue
+            lower, upper = region[key]
+            cond = cond & is_finite(value)
+            if lower is not None:
+                cond = cond & (value >= lower)
+            if upper is not None:
+                cond = cond & (value <= upper)
+
+        inside = cond if inside is None else (inside | cond)
+    return inside
+
 
 def flag_boundaries_and_abundances():
     (
@@ -362,46 +513,25 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
-    # Warn on abundances outside the optimal Teff region from Table 6 of
-    # Meszaros et al. (2025, AJ 170, 96; DR19 ASPCAP). Giants are logg < 3.8,
-    # dwarfs logg >= 3.8. [M/H] (and [X/M]) conditions are ignored for now, so
-    # where the table lists several M/H-dependent Teff ranges we use their union.
-    teff_warn_bounds = {
-        #             giants (logg < 3.8)  dwarfs (logg >= 3.8)
-        "al_h":    ((3700, 6000),       (4250, 7000)),
-        "c_12_13": (None,               None),
-        "ca_h":    ((4000, 6000),       (3500, 7000)),
-        "ce_h":    ((4000, 6000),       None),
-        "c_h":     ((3500, 6000),       (3500, 6000)),
-        "co_h":    ((3700, 6000),       None),
-        "cr_h":    ((3700, 6000),       (4250, 6000)),
-        "cu_h":    (None,               None),
-        "k_h":     ((4000, 6000),       (3500, 6500)),
-        "mg_h":    ((3200, 6500),       (3500, 7000)),
-        "mn_h":    ((3700, 6000),       (4000, 7000)),
-        "na_h":    ((3500, 5500),       (4250, 5500)),
-        "nd_h":    ((4250, 6000),       (4250, 5500)),
-        "ni_h":    ((3700, 6500),       (3500, 7000)),
-        "n_h":     ((3500, 6000),       None),
-        "o_h":     ((3500, 6000),       (3500, 6000)),
-        "p_h":     (None,               None),
-        "si_h":    ((3200, 7000),       (3500, 7000)),
-        "s_h":     ((3500, 6000),       (4500, 6000)),
-        "ti_h":    ((4000, 5500),       (4250, 5500)),
-        "v_h":     (None,               None),
-    }
-    has_teff = (ASPCAP.teff.is_null(False)) & (ASPCAP.teff != "NaN")
+    # Warn on abundances outside the optimal (Teff, [M/H], [X/M]) region from
+    # Table 6 of Meszaros et al. (2025, AJ 170, 96); see TABLE6_OPTIMAL_REGIONS.
+    # Giants are raw_logg < 3.8, dwarfs raw_logg >= 3.8. Rows with no valid
+    # Teff are not flagged.
+    def sql_is_finite(expr):
+        return expr.is_null(False) & (expr != "NaN")
+
+    has_teff = sql_is_finite(ASPCAP.teff)
     is_giant = (ASPCAP.raw_logg < 3.8)
     is_dwarf = (ASPCAP.raw_logg >= 3.8)
-    for field_name, (giant_bounds, dwarf_bounds) in teff_warn_bounds.items():
+    for field_name, (giant_regions, dwarf_regions) in TABLE6_OPTIMAL_REGIONS.items():
         print("Setting Teff warning for", field_name)
         flag_warn_teff = getattr(ASPCAP, f"flag_{field_name}_warn_teff")
-        for is_class, bounds in ((is_giant, giant_bounds), (is_dwarf, dwarf_bounds)):
-            if bounds is None:
-                outside = has_teff
-            else:
-                teff_min, teff_max = bounds
-                outside = has_teff & ((ASPCAP.teff < teff_min) | (ASPCAP.teff > teff_max))
+        x_m = getattr(ASPCAP, field_name) - ASPCAP.m_h_atm
+        for is_class, regions in ((is_giant, giant_regions), (is_dwarf, dwarf_regions)):
+            inside = in_table6_optimal_region(
+                regions, ASPCAP.teff, ASPCAP.m_h_atm, x_m, sql_is_finite
+            )
+            outside = has_teff if inside is None else (has_teff & ~inside)
             (
                 ASPCAP
                 .update(**{f"{field_name}_flags": flag_warn_teff.set()})

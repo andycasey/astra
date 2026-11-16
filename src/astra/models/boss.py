@@ -117,6 +117,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     snr = FloatField(null=True)
     gri_gaia_transform_flags = BitField(default=0)
     zwarning_flags = BitField(default=0)
+    flag_bad_trace_tab = BooleanField(default=False, help_text="DRP processed red/blue channel of different targets for this 1D spectrum")
 
     #> XCSAO
     xcsao_v_rad = FloatField(null=True)
@@ -220,3 +221,15 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         if self.run2d in ['v6_0_1','v6_0_2', 'v6_0_3', 'v6_0_4']:
             return 'p'
         return ''
+
+
+def has_bad_trace_tab(spectrum) -> bool:
+    """
+    Return True if this spectrum has the BOSS DRP `BadTraceTAB` flag set (red/blue channel
+    of different targets processed into one 1D spectrum).
+
+    Works for any spectrum-like object: spectra without the attribute (e.g., coadds) or with a
+    null value are treated as not flagged. Always returns a Python `bool`, so it can be assigned
+    directly to a `BitField` flag.
+    """
+    return bool(getattr(spectrum, "flag_bad_trace_tab", False))

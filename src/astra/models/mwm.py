@@ -182,8 +182,9 @@ class BossRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
     snr = FloatField(null=True, help_text=Glossary.snr)
     in_stack = BooleanField(null=False, help_text=Glossary.in_stack)
     gri_gaia_transform_flags = BitField(default=0, help_text="Flags for provenance of ugriz photometry")
-    zwarning_flags = BitField(default=0, help_text="BOSS DRP warning flags") 
-    
+    zwarning_flags = BitField(default=0, help_text="BOSS DRP warning flags")
+    flag_bad_trace_tab = BooleanField(default=False, help_text="DRP processed red/blue channel of different targets for this 1D spectrum")
+
     #> XCSAO
     xcsao_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
     xcsao_e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)

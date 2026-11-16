@@ -1,6 +1,7 @@
 from playhouse.hybrid import hybrid_property
 from astra.fields import (FloatField, BitField)
 from astra.models.pipeline import PipelineOutputMixin
+from astra.models.boss import has_bad_trace_tab
 
 class BossNet(PipelineOutputMixin):
 
@@ -19,7 +20,8 @@ class BossNet(PipelineOutputMixin):
     flag_unreliable_logg = result_flags.flag(2**2, help_text="`logg` is outside the range of -1 and 10")
     flag_unreliable_fe_h = result_flags.flag(2**3, help_text="`teff` < 3200 K or `logg` > 5 or `fe_h` is outside the range of -4 and 2")
     flag_suspicious_fe_h = result_flags.flag(2**4, help_text="[Fe/H] below `teff` < 3900 K and with 3 < `logg` < 6 may be suspicious")
-    
+    flag_bad_trace_tab = result_flags.flag(2**5, help_text="Input spectrum has DRP BadTraceTAB set: red/blue channel of different targets")
+
     bn_v_r = FloatField(null=True)
     e_bn_v_r = FloatField(null=True)
     
@@ -44,6 +46,7 @@ class BossNet(PipelineOutputMixin):
         |   self.flag_unreliable_logg
         |   self.flag_unreliable_fe_h
         |   self.flag_runtime_exception
+        |   self.flag_bad_trace_tab
     )
 
 
@@ -54,6 +57,7 @@ class BossNet(PipelineOutputMixin):
         |   self.flag_unreliable_logg
         |   self.flag_unreliable_fe_h
         |   self.flag_runtime_exception
+        |   self.flag_bad_trace_tab
     )
     
     @classmethod
@@ -89,5 +93,7 @@ class BossNet(PipelineOutputMixin):
                 (teff < 3900)
             &   (6 > logg > 3)
             )
+
+        kwds["flag_bad_trace_tab"] = has_bad_trace_tab(spectrum)
 
         return super().from_spectrum(spectrum, **kwds)

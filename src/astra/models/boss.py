@@ -117,6 +117,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     snr = FloatField(null=True)
     gri_gaia_transform_flags = BitField(default=0)
     zwarning_flags = BitField(default=0)
+    flag_bad_trace_tab = BooleanField(default=False, help_text="DRP processed red/blue channel of different targets for this 1D spectrum")
 
     #> XCSAO
     xcsao_v_rad = FloatField(null=True)

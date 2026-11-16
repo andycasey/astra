@@ -362,6 +362,57 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
+    # Warn on abundances outside the optimal Teff region from Table 6 of
+    # Meszaros et al. (2025, AJ 170, 96; DR19 ASPCAP). Giants are logg < 3.8,
+    # dwarfs logg >= 3.8. [M/H] (and [X/M]) conditions are ignored for now, so
+    # where the table lists several M/H-dependent Teff ranges we use their union.
+    teff_warn_bounds = {
+        #             giants (logg < 3.8)  dwarfs (logg >= 3.8)
+        "al_h":    ((3700, 6000),       (4250, 7000)),
+        "c_12_13": (None,               None),
+        "ca_h":    ((4000, 6000),       (3500, 7000)),
+        "ce_h":    ((4000, 6000),       None),
+        "c_h":     ((3500, 6000),       (3500, 6000)),
+        "co_h":    ((3700, 6000),       None),
+        "cr_h":    ((3700, 6000),       (4250, 6000)),
+        "cu_h":    (None,               None),
+        "k_h":     ((4000, 6000),       (3500, 6500)),
+        "mg_h":    ((3200, 6500),       (3500, 7000)),
+        "mn_h":    ((3700, 6000),       (4000, 7000)),
+        "na_h":    ((3500, 5500),       (4250, 5500)),
+        "nd_h":    ((4250, 6000),       (4250, 5500)),
+        "ni_h":    ((3700, 6500),       (3500, 7000)),
+        "n_h":     ((3500, 6000),       None),
+        "o_h":     ((3500, 6000),       (3500, 6000)),
+        "p_h":     (None,               None),
+        "si_h":    ((3200, 7000),       (3500, 7000)),
+        "s_h":     ((3500, 6000),       (4500, 6000)),
+        "ti_h":    ((4000, 5500),       (4250, 5500)),
+        "v_h":     (None,               None),
+    }
+    has_teff = (ASPCAP.teff.is_null(False)) & (ASPCAP.teff != "NaN")
+    is_giant = (ASPCAP.raw_logg < 3.8)
+    is_dwarf = (ASPCAP.raw_logg >= 3.8)
+    for field_name, (giant_bounds, dwarf_bounds) in teff_warn_bounds.items():
+        print("Setting Teff warning for", field_name)
+        flag_warn_teff = getattr(ASPCAP, f"flag_{field_name}_warn_teff")
+        for is_class, bounds in ((is_giant, giant_bounds), (is_dwarf, dwarf_bounds)):
+            if bounds is None:
+                outside = has_teff
+            else:
+                teff_min, teff_max = bounds
+                outside = has_teff & ((ASPCAP.teff < teff_min) | (ASPCAP.teff > teff_max))
+            (
+                ASPCAP
+                .update(**{f"{field_name}_flags": flag_warn_teff.set()})
+                .where(
+                    (ASPCAP.v_astra_major_minor >= 7)
+                &   is_class
+                &   outside
+                )
+                .execute()
+            )
+
 
 
 

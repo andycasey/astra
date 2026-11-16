@@ -108,6 +108,17 @@ def load_bad_trace_tab_spec_files(run2d) -> set:
     return spec_files
 
 
+def match_bad_trace_tab(spec_files, bad_spec_files) -> np.ndarray:
+    """
+    Return a boolean array, one entry per element of `spec_files`, that is True where the
+    spec_file (whitespace-stripped) is in `bad_spec_files`. Matching is by value, not row order.
+    """
+    spec_files = np.char.strip(np.asarray(spec_files).astype(str))
+    if not bad_spec_files:
+        return np.zeros(spec_files.shape, dtype=bool)
+    return np.isin(spec_files, list(bad_spec_files))
+
+
 def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=True, limit=None, batch_size=10_000, incremental=True):
     """
     Migrate all new BOSS visit spectrum-level information from the spAll file, which is generated
@@ -229,12 +240,10 @@ def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=Tr
             catalogid_arr = np.asarray(catalogid_raw)
 
         # Match DRP BadTraceTAB mask on spec_file.
-        bad_trace_tab_spec_files = load_bad_trace_tab_spec_files(run2d)
-        spec_file_arr = np.char.strip(masked_data["spec_file"].astype(str))
-        if bad_trace_tab_spec_files:
-            bad_trace_tab_arr = np.isin(spec_file_arr, list(bad_trace_tab_spec_files))
-        else:
-            bad_trace_tab_arr = np.zeros(spec_file_arr.size, dtype=bool)
+        bad_trace_tab_arr = match_bad_trace_tab(
+            masked_data["spec_file"],
+            load_bad_trace_tab_spec_files(run2d)
+        )
         log.info(f"Flagging {int(bad_trace_tab_arr.sum())} of {bad_trace_tab_arr.size} BOSS {run2d} spectra with flag_bad_trace_tab")
         meta_step.update(advance=1)
 

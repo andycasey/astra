@@ -544,6 +544,22 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
+    # Co is unreliable on the dwarf grids (short_grid_name ends in 'd': GKd, Md, Fd)
+    # and the BA grid.
+    print("Setting unreliable abundance warning for co_h on dwarf and BA grids")
+    (
+        ASPCAP
+        .update(co_h_flags=ASPCAP.flag_co_h_warn_abund.set())
+        .where(
+            (ASPCAP.v_astra_major_minor >= 7)
+        &   (
+                (ASPCAP.short_grid_name % "%d")     # case-sensitive LIKE
+            |   (ASPCAP.short_grid_name % "%BA")
+            )
+        )
+        .execute()
+    )
+
 
 def dr19_meszaros_flags():
     """

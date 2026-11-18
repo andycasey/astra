@@ -288,6 +288,7 @@ All per-element abundance flag fields share a common pattern of bit definitions:
 | 2^10 = 1024 | Abundances known to be unreliable for this Teff |
 | 2^11 = 2048 | Abundances known to be unreliable for this [M/H] |
 | 2^12 = 4096 | Abundances known to be unreliable for the M giant grid |
+| 2^13 = 8192 | Abundance known to be unreliable across all of parameter space; use with caution |
 
 ### FERRE (intermediate models)
 

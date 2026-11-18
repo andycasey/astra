@@ -513,6 +513,24 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
+    # Warn on abundances from the dwarf grids (short_grid_name ends in 'd': GKd, Md, Fd)
+    # below 4335 K, the minimum of the underdense gap in the ASPCAP dwarf sequence
+    # (see scripts/find_aspcap_dwarf_gap.py). Results below the gap are unreliable.
+    dwarf_grid_min_teff = 4335
+    for field_name in m_giant_warn_abundances:
+        print("Setting dwarf grid Teff warning for", field_name)
+        flag_warn_teff = getattr(ASPCAP, f"flag_{field_name}_warn_teff")
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_warn_teff.set()})
+            .where(
+                (ASPCAP.v_astra_major_minor >= 7)
+            &   (ASPCAP.short_grid_name % "%d")  # case-sensitive LIKE
+            &   (ASPCAP.teff < dwarf_grid_min_teff)
+            )
+            .execute()
+        )
+
     # Warn on abundances that are unreliable everywhere in parameter space:
     # every row gets the bit.
     unreliable_abundances = ["cu_h", "p_h", "v_h"]

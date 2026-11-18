@@ -513,10 +513,18 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
-    # Warn on abundances outside the optimal (Teff, [M/H], [X/M]) region from
-    # Table 6 of Meszaros et al. (2025, AJ 170, 96); see TABLE6_OPTIMAL_REGIONS.
-    # Giants are raw_logg < 3.8, dwarfs raw_logg >= 3.8. Rows with no valid
-    # Teff are not flagged.
+
+def dr19_meszaros_flags():
+    """
+    Set flag_{X}_warn_teff for abundances outside the optimal (Teff, [M/H], [X/M])
+    region from Table 6 of Meszaros et al. (2025, AJ 170, 96); see
+    TABLE6_OPTIMAL_REGIONS. Giants are raw_logg < 3.8, dwarfs raw_logg >= 3.8.
+    Rows with no valid Teff are not flagged.
+
+    Not part of the DR21 corrections; kept in case it is needed later.
+    Run after `flag_boundaries_and_abundances`: that resets every {X}_flags
+    field and NaNs the unphysical / censored values this depends on.
+    """
     def sql_is_finite(expr):
         return expr.is_null(False) & (expr != "NaN")
 
@@ -526,6 +534,15 @@ def flag_boundaries_and_abundances():
     for field_name, (giant_regions, dwarf_regions) in TABLE6_OPTIMAL_REGIONS.items():
         print("Setting Teff warning for", field_name)
         flag_warn_teff = getattr(ASPCAP, f"flag_{field_name}_warn_teff")
+
+        # Clear this bit only, so the function can be re-run on its own.
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_warn_teff.clear()})
+            .where(ASPCAP.v_astra_major_minor >= 7)
+            .execute()
+        )
+
         x_m = getattr(ASPCAP, field_name) - ASPCAP.m_h_atm
         for is_class, regions in ((is_giant, giant_regions), (is_dwarf, dwarf_regions)):
             inside = in_table6_optimal_region(

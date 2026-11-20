@@ -334,10 +334,33 @@ def flag_boundaries_and_abundances():
     for field_name, lhs, lower, upper, step in abundance_bounds:
         print("Doing", field_name)
 
-        # Clear the flags first.
+        # Clear the flags first, keeping only flag_{X}_ferre_fail (bit 14).
+        #
+        # Straight out of the pipeline, {X}_flags holds the abundance-stage FERRE
+        # ferre_flags (models/ferre.py layout: bit 0 = ferre_fail, bits 5-8, 15, 16,
+        # 22 = grid edges / timeout), not the ASPCAP layout. In that case carry
+        # FERRE's bit 0 over to bit 14 before resetting. Once converted, {X}_flags
+        # only uses bits 0-14, so on a re-run (when bit 0 is the Hayes
+        # upper_limit_t1) we keep bit 14 as is instead.
+        flags_field = getattr(ASPCAP, f"{field_name}_flags")
+        flag_ferre_fail = getattr(ASPCAP, f"flag_{field_name}_ferre_fail")
+        is_ferre_layout = (
+            ASPCAP
+            .select()
+            .where(
+                (ASPCAP.v_astra_major_minor >= 7)
+            &   (flags_field.bin_and(~(2**15 - 1)) != 0)
+            )
+            .exists()
+        )
+        if is_ferre_layout:
+            print(f"  {field_name}_flags has the FERRE layout: moving ferre_fail (bit 0) to bit 14")
+            reset_value = flags_field.bin_and(2**0) * flag_ferre_fail._value
+        else:
+            reset_value = flags_field.bin_and(flag_ferre_fail._value)
         (
             ASPCAP
-            .update(**{f"{field_name}_flags": 0 })
+            .update(**{f"{field_name}_flags": reset_value})
             .where(ASPCAP.v_astra_major_minor >= 7)
             .execute()
         )

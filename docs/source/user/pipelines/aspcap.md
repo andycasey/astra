@@ -296,6 +296,7 @@ Each element has its own flag bit field. The flags follow a consistent pattern:
 | 11 | `flag_*_warn_m_h` | Abundance known to be unreliable at this [M/H] |
 | 12 | `flag_*_warn_m_giant` | Abundance known to be unreliable for the M giant grid (set when `short_grid_name` contains `Mg`) |
 | 13 | `flag_*_warn_abund` | Abundance known to be unreliable across many/all grids; use with caution (set for every row of Cu, P and V, and for Co on the dwarf (`Fd`, `GKd`, `Md`) and `BA` grids) |
+| 14 | `flag_*_ferre_fail` | FERRE failed during the abundance stage (value is usually NaN, e.g. from a FERRE timeout) |
 
 ### IRFM temperature flags (`irfm_teff_flags`)
 

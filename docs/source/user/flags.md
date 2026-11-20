@@ -289,6 +289,7 @@ All per-element abundance flag fields share a common pattern of bit definitions:
 | 2^11 = 2048 | Abundances known to be unreliable for this [M/H] |
 | 2^12 = 4096 | Abundances known to be unreliable for the M giant grid |
 | 2^13 = 8192 | Abundance known to be unreliable across many/all grids; use with caution |
+| 2^14 = 16384 | FERRE failed during the abundance stage (value is usually NaN, e.g. from a FERRE timeout) |
 
 ### FERRE (intermediate models)
 

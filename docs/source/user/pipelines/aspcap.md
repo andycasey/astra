@@ -294,6 +294,8 @@ Each element has its own flag bit field. The flags follow a consistent pattern:
 | 9 | `flag_*_warn_grid_edge` | Abundance near the grid edge (warning) |
 | 10 | `flag_*_warn_teff` | Abundance known to be unreliable at this Teff |
 | 11 | `flag_*_warn_m_h` | Abundance known to be unreliable at this [M/H] |
+| 12 | `flag_*_warn_m_giant` | Abundance known to be unreliable for the M giant grid (set when `short_grid_name` contains `Mg`) |
+| 13 | `flag_*_warn_abund` | Abundance known to be unreliable across many/all grids; use with caution (set for every row of Cu, P and V, and for Co on the dwarf (`Fd`, `GKd`, `Md`) and `BA` grids) |
 
 ### IRFM temperature flags (`irfm_teff_flags`)
 

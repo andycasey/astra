@@ -53,6 +53,157 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+class _TeffLinearInMH:
+    """A Teff limit that varies linearly with [M/H] between two (m_h, teff) points."""
+
+    def __init__(self, point_1, point_2):
+        (self.m_h_1, self.teff_1), (self.m_h_2, self.teff_2) = point_1, point_2
+
+    def __call__(self, m_h):
+        slope = (self.teff_2 - self.teff_1) / (self.m_h_2 - self.m_h_1)
+        return self.teff_1 + (m_h - self.m_h_1) * slope
+
+
+def _two_cut_mh_regions(teff_min, teff_max_metal_poor, m_h_metal_poor, teff_max_metal_rich, m_h_metal_rich):
+    """
+    Table 6 rows with two [M/H] cuts, e.g. "4600-3500 K, [M/H] < -1" and
+    "6000-3500 K, [M/H] > -0.5". Allows for the Teff limit to be
+    linearly interpolated between the two cuts for intermediate [M/H].
+    """
+    return [
+        dict(teff=(teff_min, teff_max_metal_poor), m_h=(None, m_h_metal_poor)),
+        dict(
+            teff=(teff_min, _TeffLinearInMH(
+                (m_h_metal_poor, teff_max_metal_poor),
+                (m_h_metal_rich, teff_max_metal_rich),
+            )),
+            m_h=(m_h_metal_poor, m_h_metal_rich),
+        ),
+        dict(teff=(teff_min, teff_max_metal_rich), m_h=(m_h_metal_rich, None)),
+    ]
+
+
+_CNO_TWO_CUT = _two_cut_mh_regions(3500, 4600, -1.0, 6000, -0.5)
+
+# Optimal regions from Table 6 of Meszaros et al. (2025, AJ 170, 96; DR19 ASPCAP).
+# For each abundance: (giant regions, dwarf regions), where giants have
+# raw_logg < 3.8 and dwarfs raw_logg >= 3.8. Each region is a dict with
+#   teff: (min, max)          max may be a _TeffLinearInMH
+#   m_h:  (min, max)          optional; None = unbounded
+#   x_m:  (min, max)          optional; [X/M] = x_h - m_h_atm
+# A star is in the optimal region if it is inside ANY of its class's regions.
+# An empty list means "nowhere" (always warn). Fe is not in Table 6.
+TABLE6_OPTIMAL_REGIONS = {
+    "al_h": (
+        [dict(teff=(4250, 6000)), dict(teff=(3700, 4250), x_m=(0.05, None))],
+        [dict(teff=(4250, 7000))],
+    ),
+    "c_12_13": ([], []),
+    "ca_h": (
+        [dict(teff=(4000, 6000), m_h=(-2.0, None))],
+        [dict(teff=(3500, 7000), m_h=(-2.0, None))],
+    ),
+    "ce_h": (
+        [dict(teff=(4000, 6000), m_h=(-1.5, None))],
+        [],
+    ),
+    "c_h": (
+        _CNO_TWO_CUT,
+        [dict(teff=(3500, 6000), m_h=(-0.5, None))],
+    ),
+    "co_h": (
+        [dict(teff=(3700, 6000))],
+        [],
+    ),
+    "cr_h": (
+        [dict(teff=(3700, 6000), m_h=(-1.0, None))],
+        [dict(teff=(4250, 6000), m_h=(-1.0, None))],
+    ),
+    "cu_h": ([], []),
+    "k_h": (
+        [dict(teff=(4000, 6000))],
+        [dict(teff=(3500, 6500))],
+    ),
+    "mg_h": (
+        [dict(teff=(3200, 6500))],
+        [dict(teff=(3500, 7000))],
+    ),
+    "mn_h": (
+        [dict(teff=(3700, 6000))],
+        [dict(teff=(4000, 7000))],
+    ),
+    "na_h": (
+        [dict(teff=(3500, 5500), m_h=(-0.7, None))],
+        [dict(teff=(4250, 5500), m_h=(-0.7, None))],
+    ),
+    "nd_h": (
+        [dict(teff=(4250, 6000), m_h=(-1.5, None))],
+        [dict(teff=(4250, 5500), m_h=(-1.5, None))],
+    ),
+    "ni_h": (
+        [dict(teff=(4250, 6500)), dict(teff=(3700, 4250), x_m=(-0.1, None))],
+        [dict(teff=(3500, 7000))],
+    ),
+    "n_h": (
+        _CNO_TWO_CUT,
+        [],
+    ),
+    "o_h": (
+        _CNO_TWO_CUT,
+        _CNO_TWO_CUT,
+    ),
+    "p_h": ([], []),
+    "si_h": (
+        [dict(teff=(3200, 7000))],
+        [dict(teff=(3500, 7000))],
+    ),
+    "s_h": (
+        [dict(teff=(3500, 6000))],
+        [dict(teff=(4500, 6000))],
+    ),
+    "ti_h": (
+        [dict(teff=(4000, 5500))],
+        [dict(teff=(4250, 5500))],
+    ),
+    "v_h": ([], []),
+}
+
+
+def in_table6_optimal_region(regions, teff, m_h, x_m, is_finite):
+    """
+    Build the "inside the Table 6 optimal region" condition.
+
+    Works on peewee expressions (for SQL updates) and on numpy arrays, because
+    it only uses comparison, arithmetic, `&` and `|`. `is_finite(x)` must
+    return the backend's "not NULL and not NaN" condition; it guards [M/H] and
+    [X/M] so a missing value never counts as inside the region.
+
+    Returns None if `regions` is empty ("nowhere").
+    """
+    inside = None
+    for region in regions:
+        teff_min, teff_max = region["teff"]
+        if callable(teff_min):
+            teff_min = teff_min(m_h)
+        if callable(teff_max):
+            teff_max = teff_max(m_h)
+        cond = (teff >= teff_min) & (teff <= teff_max)
+        if callable(region["teff"][0]) or callable(region["teff"][1]):
+            cond = cond & is_finite(m_h)
+
+        for key, value in (("m_h", m_h), ("x_m", x_m)):
+            if key not in region:
+                continue
+            lower, upper = region[key]
+            cond = cond & is_finite(value)
+            if lower is not None:
+                cond = cond & (value >= lower)
+            if upper is not None:
+                cond = cond & (value <= upper)
+
+        inside = cond if inside is None else (inside | cond)
+    return inside
+
 
 def flag_boundaries_and_abundances():
     (
@@ -342,6 +493,119 @@ def flag_boundaries_and_abundances():
     # s_h < 4250
     # ti_h < 4250
     # v_h < 4250
+
+    # Warn on abundances from the M giant grid (short_grid_name contains 'Mg').
+    m_giant_warn_abundances = [
+        "al_h", "c_12_13", "ca_h", "ce_h", "c_h", "co_h", "cr_h", "cu_h",
+        "fe_h", "k_h", "mg_h", "mn_h", "na_h", "nd_h", "ni_h", "n_h",
+        "o_h", "p_h", "si_h", "s_h", "ti_h", "v_h",
+    ]
+    for field_name in m_giant_warn_abundances:
+        print("Setting M giant warning for", field_name)
+        flag_m_giant = getattr(ASPCAP, f"flag_{field_name}_warn_m_giant")
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_m_giant.set()})
+            .where(
+                (ASPCAP.v_astra_major_minor >= 7)
+            &   (ASPCAP.short_grid_name % "%Mg%")  # case-sensitive LIKE (.contains() is ILIKE)
+            )
+            .execute()
+        )
+
+    # Warn on abundances from the dwarf grids (short_grid_name ends in 'd': GKd, Md, Fd)
+    # below 4335 K, the minimum of the underdense gap in the ASPCAP dwarf sequence
+    # (see scripts/find_aspcap_dwarf_gap.py). Results below the gap are unreliable.
+    dwarf_grid_min_teff = 4335
+    for field_name in m_giant_warn_abundances:
+        print("Setting dwarf grid Teff warning for", field_name)
+        flag_warn_teff = getattr(ASPCAP, f"flag_{field_name}_warn_teff")
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_warn_teff.set()})
+            .where(
+                (ASPCAP.v_astra_major_minor >= 7)
+            &   (ASPCAP.short_grid_name % "%d")  # case-sensitive LIKE
+            &   (ASPCAP.teff < dwarf_grid_min_teff)
+            )
+            .execute()
+        )
+
+    # Warn on abundances that are unreliable everywhere in parameter space:
+    # every row gets the bit.
+    unreliable_abundances = ["cu_h", "p_h", "v_h"]
+    for field_name in unreliable_abundances:
+        print("Setting unreliable abundance warning for", field_name)
+        flag_warn_abund = getattr(ASPCAP, f"flag_{field_name}_warn_abund")
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_warn_abund.set()})
+            .where(ASPCAP.v_astra_major_minor >= 7)
+            .execute()
+        )
+
+    # Co is unreliable on the dwarf grids (short_grid_name ends in 'd': GKd, Md, Fd)
+    # and the BA grid.
+    print("Setting unreliable abundance warning for co_h on dwarf and BA grids")
+    (
+        ASPCAP
+        .update(co_h_flags=ASPCAP.flag_co_h_warn_abund.set())
+        .where(
+            (ASPCAP.v_astra_major_minor >= 7)
+        &   (
+                (ASPCAP.short_grid_name % "%d")     # case-sensitive LIKE
+            |   (ASPCAP.short_grid_name % "%BA")
+            )
+        )
+        .execute()
+    )
+
+
+def dr19_meszaros_flags():
+    """
+    Set flag_{X}_warn_teff for abundances outside the optimal (Teff, [M/H], [X/M])
+    region from Table 6 of Meszaros et al. (2025, AJ 170, 96); see
+    TABLE6_OPTIMAL_REGIONS. Giants are raw_logg < 3.8, dwarfs raw_logg >= 3.8.
+    Rows with no valid Teff are not flagged.
+
+    Not part of the DR21 corrections; kept in case it is needed later.
+    Run after `flag_boundaries_and_abundances`: that resets every {X}_flags
+    field and NaNs the unphysical / censored values this depends on.
+    """
+    def sql_is_finite(expr):
+        return expr.is_null(False) & (expr != "NaN")
+
+    has_teff = sql_is_finite(ASPCAP.teff)
+    is_giant = (ASPCAP.raw_logg < 3.8)
+    is_dwarf = (ASPCAP.raw_logg >= 3.8)
+    for field_name, (giant_regions, dwarf_regions) in TABLE6_OPTIMAL_REGIONS.items():
+        print("Setting Teff warning for", field_name)
+        flag_warn_teff = getattr(ASPCAP, f"flag_{field_name}_warn_teff")
+
+        # Clear this bit only, so the function can be re-run on its own.
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_warn_teff.clear()})
+            .where(ASPCAP.v_astra_major_minor >= 7)
+            .execute()
+        )
+
+        x_m = getattr(ASPCAP, field_name) - ASPCAP.m_h_atm
+        for is_class, regions in ((is_giant, giant_regions), (is_dwarf, dwarf_regions)):
+            inside = in_table6_optimal_region(
+                regions, ASPCAP.teff, ASPCAP.m_h_atm, x_m, sql_is_finite
+            )
+            outside = has_teff if inside is None else (has_teff & ~inside)
+            (
+                ASPCAP
+                .update(**{f"{field_name}_flags": flag_warn_teff.set()})
+                .where(
+                    (ASPCAP.v_astra_major_minor >= 7)
+                &   is_class
+                &   outside
+                )
+                .execute()
+            )
 
 
 

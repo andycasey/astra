@@ -153,10 +153,19 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
     # We cannot guarantee that the order of the RETURNING clause will be the same as the input order.
     # We need the `task_pk` generated, and we need (`spectrum_pk`, `v_astra`) to map to the results list, and we need
     # `created` so that we can attach it to the object.
+    # peewee's insert_many takes its column list from the keys of the first row,
+    # and silently drops any column that only later rows have.  If the first
+    # result is sparse (e.g., a `flag_no_result` row with only primary keys and
+    # flags), every result in the batch would lose its values.  Give every row
+    # the same keys; fields absent from a row were never set and have no
+    # default, so they are NULL.
+    columns = set().union(*(r.__data__.keys() for r in results))
+    rows = [{k: r.__data__.get(k) for k in columns} for r in results]
+
     try:
         q = (
             model
-            .insert_many(r.__data__ for r in results)
+            .insert_many(rows)
             .returning(
                 model.task_pk,
                 first_conflict_target,

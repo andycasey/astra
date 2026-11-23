@@ -205,7 +205,29 @@ def in_table6_optimal_region(regions, teff, m_h, x_m, is_finite):
     return inside
 
 
-def flag_boundaries_and_abundances():
+def _scope(where=None):
+    """
+    Rows that the DR21 correction functions act on: the current version, optionally
+    restricted by `where` (a peewee expression on ASPCAP, e.g. to re-apply the
+    corrections only to rows that were re-run). With `where=None` this is the same
+    filter the functions have always used.
+    """
+    scope = (ASPCAP.v_astra_major_minor >= 7)
+    return scope if where is None else (scope & where)
+
+
+def flag_boundaries_and_abundances(where=None, ferre_layout=None):
+    """
+    :param where: [optional]
+        Restrict all updates to rows matching this ASPCAP expression.
+
+    :param ferre_layout: [optional]
+        Whether the {X}_flags fields still hold the raw FERRE layout (straight out of the
+        pipeline) and need converting. `None` detects this per element from the rows in
+        scope. Pass `True` when re-applying to freshly re-run rows: detection can be wrong
+        if none of them happen to have FERRE bits >= 15 set.
+    """
+    scope = _scope(where)
     (
         ASPCAP
         .update(
@@ -228,7 +250,7 @@ def flag_boundaries_and_abundances():
             result_flags=ASPCAP.flag_unphysical_parameters.set()
         )
         .where(
-            (ASPCAP.v_astra_major_minor >= 7)
+            (scope)
         &   (
                 (ASPCAP.raw_logg < -0.5)
             |   (ASPCAP.raw_teff < 0)
@@ -257,14 +279,14 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(result_flags=bad_flag.clear())
             .where(
-                ASPCAP.v_astra_major_minor >= 7
+                scope
             )
             .execute()
         )
         (
             ASPCAP
             .update(result_flags=warn_flag.clear())
-            .where(ASPCAP.v_astra_major_minor >= 7)
+            .where(scope)
             .execute()
         )
 
@@ -289,7 +311,7 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(result_flags=warn_flag.set())
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (field.is_null(False))
             &   warn_where
             )
@@ -299,7 +321,7 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(result_flags=bad_flag.set())
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (field.is_null(False))
             &   bad_where
             )
@@ -344,15 +366,18 @@ def flag_boundaries_and_abundances():
         # upper_limit_t1) we keep bit 14 as is instead.
         flags_field = getattr(ASPCAP, f"{field_name}_flags")
         flag_ferre_fail = getattr(ASPCAP, f"flag_{field_name}_ferre_fail")
-        is_ferre_layout = (
-            ASPCAP
-            .select()
-            .where(
-                (ASPCAP.v_astra_major_minor >= 7)
-            &   (flags_field.bin_and(~(2**15 - 1)) != 0)
+        if ferre_layout is None:
+            is_ferre_layout = (
+                ASPCAP
+                .select()
+                .where(
+                    (scope)
+                &   (flags_field.bin_and(~(2**15 - 1)) != 0)
+                )
+                .exists()
             )
-            .exists()
-        )
+        else:
+            is_ferre_layout = ferre_layout
         if is_ferre_layout:
             print(f"  {field_name}_flags has the FERRE layout: moving ferre_fail (bit 0) to bit 14")
             reset_value = flags_field.bin_and(2**0) * flag_ferre_fail._value
@@ -361,7 +386,7 @@ def flag_boundaries_and_abundances():
         (
             ASPCAP
             .update(**{f"{field_name}_flags": reset_value})
-            .where(ASPCAP.v_astra_major_minor >= 7)
+            .where(scope)
             .execute()
         )
 
@@ -371,7 +396,7 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(**{f"{field_name}_flags": flag_bad.set()})
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (
                     (lhs < (lower + 1/8 * step))
                 |   (lhs > (upper - 1/8 * step))
@@ -386,7 +411,7 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(**{f"{field_name}_flags": flag_warn.set()})
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (
                     (lhs < (lower + step))
                 |   (lhs > (upper - step))
@@ -405,7 +430,7 @@ def flag_boundaries_and_abundances():
                 f"e_{field_name}": np.nan,
             })
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (lhs < (lower - 10))
             )
             .execute()
@@ -479,7 +504,7 @@ def flag_boundaries_and_abundances():
             v_h_flags=ASPCAP.flag_v_h_censored_low_teff_vmicro.set(),
         )
         .where(
-            (ASPCAP.v_astra_major_minor >= 7)
+            (scope)
         &   (ASPCAP.raw_logg <= 3.8)
         &   (
                 (ASPCAP.teff <= 3250)               # any v_micro
@@ -530,7 +555,7 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(**{f"{field_name}_flags": flag_m_giant.set()})
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (ASPCAP.short_grid_name % "%Mg%")  # case-sensitive LIKE (.contains() is ILIKE)
             )
             .execute()
@@ -547,7 +572,7 @@ def flag_boundaries_and_abundances():
             ASPCAP
             .update(**{f"{field_name}_flags": flag_warn_teff.set()})
             .where(
-                (ASPCAP.v_astra_major_minor >= 7)
+                (scope)
             &   (ASPCAP.short_grid_name % "%d")  # case-sensitive LIKE
             &   (ASPCAP.teff < dwarf_grid_min_teff)
             )
@@ -563,7 +588,7 @@ def flag_boundaries_and_abundances():
         (
             ASPCAP
             .update(**{f"{field_name}_flags": flag_warn_abund.set()})
-            .where(ASPCAP.v_astra_major_minor >= 7)
+            .where(scope)
             .execute()
         )
 
@@ -574,7 +599,7 @@ def flag_boundaries_and_abundances():
         ASPCAP
         .update(co_h_flags=ASPCAP.flag_co_h_warn_abund.set())
         .where(
-            (ASPCAP.v_astra_major_minor >= 7)
+            (scope)
         &   (
                 (ASPCAP.short_grid_name % "%d")     # case-sensitive LIKE
             |   (ASPCAP.short_grid_name % "%BA")
@@ -634,7 +659,12 @@ def dr19_meszaros_flags():
 
 
 
-def flag_upper_limits_by_hayes_2022():
+def flag_upper_limits_by_hayes_2022(where=None):
+    """
+    :param where: [optional]
+        Restrict all updates to rows matching this ASPCAP expression.
+    """
+    scope = _scope(where)
     from astropy.table import Table
     coeff = Table.read(expand_path("$MWM_ASTRA/pipelines/aspcap/hayes_2022_upper_limit_coefficients.txt"), format="ascii")
 
@@ -683,14 +713,14 @@ def flag_upper_limits_by_hayes_2022():
                 (
                     ASPCAP
                     .update(**{f"{element.lower()}_h_flags": flag.clear() })
-                    .where((ASPCAP.v_astra_major_minor >= 7))
+                    .where((scope))
                     .execute()
                 )
                 (
                     ASPCAP
                     .update(**{f"{element.lower()}_h_flags": flag.set() })
                     .where(
-                        (ASPCAP.v_astra_major_minor >= 7)
+                        (scope)
                     &   where
                     )
                     .execute()
@@ -700,8 +730,15 @@ def flag_upper_limits_by_hayes_2022():
 
 
 
-def apply_flags():
+def apply_flags(where=None):
+    """
+    :param where: [optional]
+        Restrict all updates to rows matching this ASPCAP expression. The density map
+        behind `flag_suspicious_parameters` is still built from all rows, so a subset
+        gets the same bit it would get in a full run.
+    """
     # TODO: Move all this to the construction of aspcap rows
+    scope = _scope(where)
 
     (
         ASPCAP
@@ -711,7 +748,7 @@ def apply_flags():
         .where(
             (ASPCAP.raw_v_sini.is_null(False))
         &   (ASPCAP.raw_v_sini != 'NaN')
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         &   (
             (
                 ((ASPCAP.raw_teff < 5250) & (ASPCAP.raw_v_sini > 3))
@@ -727,7 +764,7 @@ def apply_flags():
         .where(
             (ASPCAP.raw_logg <= 3)
         &   (ASPCAP.raw_v_micro > 3)
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -741,7 +778,7 @@ def apply_flags():
                 (ASPCAP.raw_teff <= 3000)
             |   (ASPCAP.raw_logg < -1)
             )
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -752,7 +789,7 @@ def apply_flags():
         )
         .where(
             (ASPCAP.ferre_log_snr_sq < 20)
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -763,7 +800,7 @@ def apply_flags():
         )
         .where(
             (ASPCAP.rchi2 > 1000)
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -776,7 +813,7 @@ def apply_flags():
             (ASPCAP.m_h_atm.is_null(False))
         &   (ASPCAP.fe_h.is_null(False))
         &   ((ASPCAP.m_h_atm - ASPCAP.fe_h) > 0.1)
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -788,7 +825,7 @@ def apply_flags():
         )
         .join(ApogeeCoaddedSpectrumInApStar, on=(ASPCAP.spectrum_pk == ApogeeCoaddedSpectrumInApStar.spectrum_pk))
         .where(
-            (ASPCAP.v_astra_major_minor >= 7)
+            (scope)
         )
         .objects()
     )
@@ -881,6 +918,11 @@ def apply_flags():
                     foo = q[index]
                     foo.flag_suspicious_parameters = True
                     for_updating.append(foo)
+
+    if where is not None:
+        # The density map above uses all rows; only flag the rows in scope.
+        in_scope = set(pk for (pk,) in ASPCAP.select(ASPCAP.task_pk).where(scope).tuples())
+        for_updating = [r for r in for_updating if r.task_pk in in_scope]
 
     print(f"Setting {len(for_updating)}")
     for chunk in chunked(for_updating, 1000):
@@ -1521,7 +1563,12 @@ def apply_solar_neighbourhood_abundance_corrections():
         .execute()
     )
 
-def apply_dr19_solar_neighbourhood_abundance_corrections():
+def apply_dr19_solar_neighbourhood_abundance_corrections(where=None):
+    """
+    :param where: [optional]
+        Restrict the updates to rows matching this ASPCAP expression.
+    """
+    scope = _scope(where)
     import pickle
     from astra.utils import expand_path
     with open(expand_path(f"$MWM_ASTRA/0.6.0/aux/aspcap_snc_corrections.pkl"), "rb") as fp:
@@ -1542,7 +1589,7 @@ def apply_dr19_solar_neighbourhood_abundance_corrections():
         .update(**giant_kwds)
         .where(
             (ASPCAP.raw_logg < 3.8)
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -1551,7 +1598,7 @@ def apply_dr19_solar_neighbourhood_abundance_corrections():
         .update(**dwarf_kwds)
         .where(
             (ASPCAP.raw_logg >= 3.8)
-        &   (ASPCAP.v_astra_major_minor >= 7)
+        &   (scope)
         )
         .execute()
     )
@@ -2248,7 +2295,7 @@ def get_dr21_logg_corrections(logg_spec, mh, teff, maxiter=200, tol=1e-6,
     return logg_cal, flags, n_iter
 
 
-def apply_dr21_parameter_corrections(batch_size: int = 500):
+def apply_dr21_parameter_corrections(batch_size: int = 500, where=None):
     """
     Apply the DR21 corrections to the ASPCAP table.
     Teff: strat3_F_Dwarf6500 (Guilherme Limberg), calibrated to GHB09 J-Ks Teff
@@ -2264,6 +2311,9 @@ def apply_dr21_parameter_corrections(batch_size: int = 500):
 
     The equations, calibration data and validation are documented in
     final_dr21_calibration/dr21_corrections.{py,md,tex} (GG/MWMHalo).
+
+    :param where: [optional]
+        Restrict the corrections to rows matching this ASPCAP expression.
     """
 
     def _raw(chunk, name):
@@ -2274,9 +2324,12 @@ def apply_dr21_parameter_corrections(batch_size: int = 500):
         return a
 
     # Uncertainties are not calibrated: copy them column-to-column in SQL.
-    ASPCAP.update(e_teff=ASPCAP.raw_e_teff, e_logg=ASPCAP.raw_e_logg).execute()
-
+    errors = ASPCAP.update(e_teff=ASPCAP.raw_e_teff, e_logg=ASPCAP.raw_e_logg)
     q = ASPCAP.select()
+    if where is not None:
+        errors = errors.where(where)
+        q = q.where(where)
+    errors.execute()
     with tqdm(total=0, desc="Applying corrections") as pb:
         for chunk in chunked(q, batch_size):
             chunk = list(chunk)

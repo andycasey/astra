@@ -19,12 +19,17 @@ SDSS_NP_POOL = "sdss_np"
 # astraStar take turns on the other 2. Every other task in a run must finish within one
 # ASPCAP batch, or the next run isn't created in time and ASPCAP sits idle.
 MWM_NODES = 1
-ASPCAP_NODES = 13
+ASPCAP_NODES = 7
 ASTRA_STAR_NODES = 1
 ASTRONN_DIST_NODES = 1
 ASPCAP_LIMIT = 12_500 * ASPCAP_NODES
 MWM_LIMIT = 500_000
-ASTRONN_STAR_LIMIT = 700_000
+# AstroNN star is split into ASTRONN_NODES GPU jobs of ~LIMIT/NODES spectra each. Peak memory
+# was 43-168 GB for 700k-spectrum jobs (--mem=160G), so keep each job at <= ~600k spectra.
+ASTRONN_NODES = 4
+ASTRONN_STAR_LIMIT = 2_400_000
+# Visit runs as a single job (--mem=100G, ~10-24 GB per 100k spectra), so keep the old limit.
+ASTRONN_VISIT_LIMIT = 700_000
 # When a pipeline has nothing to process, `astra srun` exits 99, which BashOperator marks as
 # skipped; its downstream `astra create ... --overwrite` is then skipped too, so unchanged
 # products are not rewritten.
@@ -159,7 +164,9 @@ with DAG(
         astronn_star = BashOperator(
             task_id="star",
             # bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeCoaddedSpectrumInApStar --no-exclusive --mem=160G --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
-            bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeCoaddedSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=160G --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="48:00:00"'
+            # --cpus=4: astronn runs a reader process plus the inference process; with 1 CPU they
+            # share one core and the job is CPU-bound.
+            bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} --nodes {ASTRONN_NODES} apogee.ApogeeCoaddedSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=160G --cpus=4 --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="48:00:00"'
         )
         astronn_star >> (
             BashOperator(
@@ -171,7 +178,7 @@ with DAG(
             BashOperator(
                 task_id="visit",
                 # bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeVisitSpectrumInApStar --no-exclusive --mem=100G --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
-                bash_command=f'astra srun astronn --limit {ASTRONN_STAR_LIMIT} apogee.ApogeeVisitSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=100G --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="48:00:00"'
+                bash_command=f'astra srun astronn --limit {ASTRONN_VISIT_LIMIT} apogee.ApogeeVisitSpectrumInApStar {SKIP_IF_EMPTY} --no-exclusive --mem=100G --cpus=4 --gres=gpu:1 --partition=notchpeak-gpu-guest --account=owner-gpu-guest --time="48:00:00"'
             )
         ) >> (
             BashOperator(

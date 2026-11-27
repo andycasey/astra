@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from astropy.io import fits
 from astropy.table import Table
@@ -69,6 +70,53 @@ def match_unlinked_boss_visit_spectra():
                 .execute()
             )
     return n
+
+
+#: Per-spectrum DRP quality masks, keyed by run2d. Each file carries `SPEC_FILE` and a
+#: `BadTraceTAB` boolean column. Rows are joined to spAll by `SPEC_FILE` value (not by row order).
+BAD_TRACE_TAB_MASK_PATHS = {
+    "v6_2_1": "$SAS_BASE_DIR/ipl-5/spectro/boss/redux/v6_2_1/summary/masks/spAll_ipl5_mask.fits",
+}
+
+
+def load_bad_trace_tab_spec_files(run2d) -> set:
+    """
+    Return the set of spec_file basenames that the BOSS DRP flagged with `BadTraceTAB`
+    (red/blue channel of different targets processed into one 1D spectrum).
+
+    Matching is done on `SPEC_FILE` rather than `SPECOBJID`: `SPECOBJID` is empty for
+    ~6M rows of the spAll mask (including some flagged spectra), whereas `SPEC_FILE`
+    is unique per row and is stored by Astra as `BossVisitSpectrum.spec_file`.
+
+    If no mask is defined for this `run2d`, or the mask file does not exist, an empty set
+    is returned so that `flag_bad_trace_tab` is False everywhere.
+    """
+    try:
+        path = expand_path(BAD_TRACE_TAB_MASK_PATHS[run2d])
+    except KeyError:
+        log.warning(f"No BadTraceTAB mask defined for run2d={run2d}; flag_bad_trace_tab will be False for all spectra")
+        return set()
+
+    if not os.path.exists(path):
+        log.warning(f"BadTraceTAB mask file {path} does not exist; flag_bad_trace_tab will be False for all spectra")
+        return set()
+
+    mask = fitsio.read(path, ext=1, columns=["SPEC_FILE", "BadTraceTAB"])
+    bad = np.asarray(mask["BadTraceTAB"], dtype=bool)
+    spec_files = set(np.char.strip(mask["SPEC_FILE"][bad].astype(str)).tolist())
+    log.info(f"Loaded {len(spec_files)} BadTraceTAB spectra from {path}")
+    return spec_files
+
+
+def match_bad_trace_tab(spec_files, bad_spec_files) -> np.ndarray:
+    """
+    Return a boolean array, one entry per element of `spec_files`, that is True where the
+    spec_file (whitespace-stripped) is in `bad_spec_files`. Matching is by value, not row order.
+    """
+    spec_files = np.char.strip(np.asarray(spec_files).astype(str))
+    if not bad_spec_files:
+        return np.zeros(spec_files.shape, dtype=bool)
+    return np.isin(spec_files, list(bad_spec_files))
 
 
 def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=True, limit=None, batch_size=10_000, incremental=True):
@@ -190,6 +238,13 @@ def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=Tr
             catalogid_arr = np.where(catalogid_raw.mask, -1, catalogid_raw.data)
         else:
             catalogid_arr = np.asarray(catalogid_raw)
+
+        # Match DRP BadTraceTAB mask on spec_file.
+        bad_trace_tab_arr = match_bad_trace_tab(
+            masked_data["spec_file"],
+            load_bad_trace_tab_spec_files(run2d)
+        )
+        log.info(f"Flagging {int(bad_trace_tab_arr.sum())} of {bad_trace_tab_arr.size} BOSS {run2d} spectra with flag_bad_trace_tab")
         meta_step.update(advance=1)
 
     # Pre-convert numpy arrays to Python types for faster iteration
@@ -221,6 +276,7 @@ def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=Tr
         masked_data["snr"].tolist(),
         masked_data["spec_file"].tolist(),
         fiber_offset_arr.tolist(),
+        bad_trace_tab_arr.tolist(),
     )
 
     # Build all rows at once using zip (much faster than index access)
@@ -256,6 +312,7 @@ def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=Tr
             "snr": row[24],
             "spec_file": row[25],
             "fiber_offset": row[26],
+            "flag_bad_trace_tab": row[27],
         }
         for row in zip(*all_columns)
     ]

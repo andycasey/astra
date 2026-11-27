@@ -40,6 +40,7 @@ dependencies = [
   "torch==2.12.0", # cu126 build; see [tool.uv.sources] below
   "astronn",
   "sdss-semaphore",
+  "lmfit>=1.3.4",
 ]
 #requires-python = ">= 3.9"
 
